@@ -5,7 +5,7 @@ GeoConverterProEA, tarayıcı üzerinde çalışan, yüksek performanslı ve mod
 ## 🚀 Canlı Önizleme
 Uygulamayı yüklemeye gerek kalmadan anında test etmek için aşağıdaki bağlantıya tıklayabilirsiniz:
 
-👉 **[Uygulamayı Canlı Test Etmek İçin Tıklayın (GitHub Pages)](https://erdemalpar.github.io/GeoConverterProEA/)**
+👉 **[Uygulamayı Canlı Test Etmek İçin Tıklayın (GitHub Pages)](https://cbstkgm.github.io/GeoConverterProEA/)**
 
 ---
 
@@ -20,7 +20,7 @@ Uygulamayı yüklemeye gerek kalmadan anında test etmek için aşağıdaki bağ
 Projeyi kendi yerel (local) ortamınızda geliştirmek için aşağıdaki komutları kullanabilirsiniz:
 
 ```bash
-git clone https://github.com/erdemalpar/GeoConverterProEA.git
+git clone https://github.com/cbstkgm/GeoConverterProEA.git
 cd GeoConverterProEA
 npm install
 npm run dev
