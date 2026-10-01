@@ -36,6 +36,16 @@ const guvenli_metin_gosterimi = (metin) => {
   return metin;
 };
 
+// Z=0 ve Z Takılarını Temizleyen Regex Motoru
+const z_degerlerini_sil = (metin) => {
+  if (!metin) return '';
+  let yeni_metin = metin.replace(/ Z /g, ' ').replace(/ Z\(/g, '('); // WKT 'Z' ibarelerini sil
+  yeni_metin = yeni_metin.replace(/ 0(?=,)/g, ''); // WKT: (X Y 0,) -> (X Y,)
+  yeni_metin = yeni_metin.replace(/ 0(?=\))/g, ''); // WKT: (X Y 0) -> (X Y)
+  yeni_metin = yeni_metin.replace(/,\s*0\s*\]/g, ']'); // JSON/GeoJSON: [X, Y, 0] -> [X, Y]
+  return yeni_metin;
+}
+
 function App() {
   const [secili_dosya, dosya_ayarla] = useState(null);
   const [hedef_format, hedef_format_ayarla] = useState('.wkt');
@@ -47,6 +57,10 @@ function App() {
   const [kaynak_kopyalandi, kaynak_kopyalandi_ayarla] = useState(false);
   const [sonuc_kopyalandi, sonuc_kopyalandi_ayarla] = useState(false);
   
+  // Z Değerleri temizleme state'leri (Kullanıcı dilediğinde tıklayabilir)
+  const [z_temizle_kaynak, z_temizle_kaynak_ayarla] = useState(false);
+  const [z_temizle_sonuc, z_temizle_sonuc_ayarla] = useState(false);
+
   // Gerçek veri state'leri
   const [kaynak_geojson, kaynak_geojson_ayarla] = useState(null);
   const [sonuc_geojson, sonuc_geojson_ayarla] = useState(null);
@@ -55,12 +69,10 @@ function App() {
 
   const dosya_girdi_ref = useRef(null);
 
-  // Dosya parse fonksiyonu (Büyük veriler için UI'ı rahatlatır)
   const dosyayi_oku = async (file) => {
     if (!file) return;
     const isim = file.name.toLowerCase();
     
-    // UI'ın dondu hissi vermemesi için bilgilendirme ve kısa bir Thread duraklatması
     islem_durumu_ayarla('Dosya okunuyor (Büyük veri işlenirken tarayıcı kısa süre bekleyebilir)...');
     await new Promise(resolve => setTimeout(resolve, 50)); 
     
@@ -81,7 +93,6 @@ function App() {
           const geojson = kml(xmlDoc);
           kaynak_geojson_ayarla(geojson);
           
-          // Stringify ağır bir işlemdir
           const textJson = JSON.stringify(geojson, null, 2);
           kaynak_metin_ayarla(textJson);
           islem_durumu_ayarla(`Kaynak dosya başarıyla okundu. (${textJson.length.toLocaleString()} Karakter)`);
@@ -137,22 +148,10 @@ function App() {
     sonuc_metin_ayarla('');
   };
 
-  const surukleme_basladi = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    surukleniyor_ayarla(true);
-  };
-
-  const surukleme_bitti = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    surukleniyor_ayarla(false);
-  };
-
+  const surukleme_basladi = (e) => { e.preventDefault(); e.stopPropagation(); surukleniyor_ayarla(true); };
+  const surukleme_bitti = (e) => { e.preventDefault(); e.stopPropagation(); surukleniyor_ayarla(false); };
   const dosya_birakildi = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    surukleniyor_ayarla(false);
+    e.preventDefault(); e.stopPropagation(); surukleniyor_ayarla(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
       dosya_ayarla(file);
@@ -215,7 +214,6 @@ function App() {
     }, 100);
   };
 
-  // Kopyalama butonu, kırpılmış metni değil, asıl veriyi kopyalamalı!
   const metin_kopyala = (metin, tip) => {
     navigator.clipboard.writeText(metin);
     if (tip === 'kaynak') {
@@ -227,9 +225,10 @@ function App() {
     }
   };
 
-  // İndirme butonu, kırpılmış metni değil, asıl veriyi indirmeli!
   const indir_tetikle = () => {
-    const blob = new Blob([sonuc_metin], { type: 'text/plain;charset=utf-8' });
+    // İndirme yaparken Z Temizle işaretli ise, metni süzüp (filtreleyip) indir
+    const indirilecek_veri = z_temizle_sonuc ? z_degerlerini_sil(sonuc_metin) : sonuc_metin;
+    const blob = new Blob([indirilecek_veri], { type: 'text/plain;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = `donusturulmus_veri${hedef_format}`;
@@ -238,35 +237,18 @@ function App() {
 
   const HaritaBileseni = ({ data, renk }) => {
     return (
-      // preferCanvas={true} : Dev geometrilerde dom patlamasını engeller
       <MapContainer center={[39.93, 32.86]} zoom={12} style={{ height: '100%', width: '100%' }} preferCanvas={true}>
         <LayersControl position="topright">
           <BaseLayer checked name="Google Uydu">
-            <TileLayer
-              url="http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}"
-              attribution="&copy; Google"
-            />
+            <TileLayer url="http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}" attribution="&copy; Google" />
           </BaseLayer>
           <BaseLayer name="Google Harita">
-            <TileLayer
-              url="http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}"
-              attribution="&copy; Google"
-            />
+            <TileLayer url="http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}" attribution="&copy; Google" />
           </BaseLayer>
           <BaseLayer name="OpenStreetMap">
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; OpenStreetMap"
-            />
-          </BaseLayer>
-          <BaseLayer name="Esri World Imagery">
-            <TileLayer
-              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              attribution="&copy; Esri"
-            />
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
           </BaseLayer>
         </LayersControl>
-        
         {data && <GeoJSON data={data} style={{ color: renk, weight: 2, fillColor: renk, fillOpacity: 0.3 }} />}
         <BoundingBoxFit data={data} />
       </MapContainer>
@@ -275,7 +257,6 @@ function App() {
 
   return (
     <div className="uygulama-kapsayici">
-      
       <div className="baslik-alani">
         <h1>GeoConverterProEA</h1>
         <p className="aciklama">Gelişmiş Harita & Geometri Dönüştürücüsü</p>
@@ -296,37 +277,38 @@ function App() {
           >
             <div className="dosya-yukleme-ikon">📂</div>
             <p>{secili_dosya ? secili_dosya.name : 'Dosya Seç (Tıklayın veya Sürükleyin)'}</p>
-            <input 
-              type="file" 
-              ref={dosya_girdi_ref} 
-              style={{ display: 'none' }} 
-              onChange={dosya_secildi} 
-            />
+            <input type="file" ref={dosya_girdi_ref} style={{ display: 'none' }} onChange={dosya_secildi} />
           </div>
 
           <div className="harita-alani" style={{ height: '300px' }}>
-            {kaynak_geojson ? (
-              <HaritaBileseni data={kaynak_geojson} renk="#ff4c4c" /> 
-            ) : (
-              <div className="harita-bos">Harita (Kaynak)</div>
-            )}
+            {kaynak_geojson ? <HaritaBileseni data={kaynak_geojson} renk="#ff4c4c" /> : <div className="harita-bos">Harita (Kaynak)</div>}
           </div>
 
           {/* KAYNAK METİN KUTUSU */}
           <div className="metin-kutusu-kapsayici">
             <div className="metin-kutusu-baslik">
               <span>Kaynak Veri Özeti</span>
-              <button 
-                onClick={() => metin_kopyala(kaynak_metin, 'kaynak')} 
-                className="kopyala-butonu"
-                disabled={!kaynak_metin}
-              >
-                {kaynak_kopyalandi ? '✅ Kopyalandı' : '📋 Kopyala'}
-              </button>
+              <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
+                <label style={{fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: '#a0a0a0', userSelect: 'none'}}>
+                  <input 
+                    type="checkbox" 
+                    checked={z_temizle_kaynak} 
+                    onChange={(e) => z_temizle_kaynak_ayarla(e.target.checked)} 
+                  /> 
+                  Z=0 Temizle
+                </label>
+                <button 
+                  onClick={() => metin_kopyala(z_temizle_kaynak ? z_degerlerini_sil(kaynak_metin) : kaynak_metin, 'kaynak')} 
+                  className="kopyala-butonu"
+                  disabled={!kaynak_metin}
+                >
+                  {kaynak_kopyalandi ? '✅ Kopyalandı' : '📋 Kopyala'}
+                </button>
+              </div>
             </div>
             <textarea 
               readOnly 
-              value={guvenli_metin_gosterimi(kaynak_metin)} 
+              value={guvenli_metin_gosterimi(z_temizle_kaynak ? z_degerlerini_sil(kaynak_metin) : kaynak_metin)} 
               placeholder="Dosya seçildiğinde metin karşılığı burada görünecek..." 
             />
           </div>
@@ -337,16 +319,11 @@ function App() {
         <div className="fluent-panel kontrol-paneli">
           <div className="form-grubu">
             <label>Dönüşecek Dosya (Hedef) Seçin:</label>
-            <select 
-              value={hedef_format} 
-              onChange={(e) => hedef_format_ayarla(e.target.value)}
-            >
+            <select value={hedef_format} onChange={(e) => hedef_format_ayarla(e.target.value)}>
               {desteklenen_formatlar.map((grup, i) => (
                 <optgroup key={i} label={grup.kategori}>
                   {grup.formatlar.map((fmt, j) => (
-                    <option key={`${i}-${j}`} value={fmt.uzanti}>
-                      {fmt.aciklama} ({fmt.uzanti})
-                    </option>
+                    <option key={`${i}-${j}`} value={fmt.uzanti}>{fmt.aciklama} ({fmt.uzanti})</option>
                   ))}
                 </optgroup>
               ))}
@@ -372,38 +349,40 @@ function App() {
           <h2 className="panel-baslik">2. Sonuç Veri</h2>
           
           <div className="harita-alani" style={{ marginTop: 0, height: '350px' }}>
-            {sonuc_geojson && donusum_tamamlandi ? (
-              <HaritaBileseni data={sonuc_geojson} renk="#4cc2ff" /> 
-            ) : (
-              <div className="harita-bos">Harita (Sonuç)</div>
-            )}
+            {sonuc_geojson && donusum_tamamlandi ? <HaritaBileseni data={sonuc_geojson} renk="#4cc2ff" /> : <div className="harita-bos">Harita (Sonuç)</div>}
           </div>
 
           {/* SONUÇ METİN KUTUSU */}
           <div className="metin-kutusu-kapsayici">
             <div className="metin-kutusu-baslik">
               <span>Dönüştürülen Veri ({hedef_format})</span>
-              <button 
-                onClick={() => metin_kopyala(sonuc_metin, 'sonuc')} 
-                className="kopyala-butonu"
-                disabled={!donusum_tamamlandi || !sonuc_metin}
-              >
-                {sonuc_kopyalandi ? '✅ Kopyalandı' : '📋 Kopyala'}
-              </button>
+              <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
+                <label style={{fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: '#a0a0a0', userSelect: 'none'}}>
+                  <input 
+                    type="checkbox" 
+                    checked={z_temizle_sonuc} 
+                    onChange={(e) => z_temizle_sonuc_ayarla(e.target.checked)} 
+                  /> 
+                  Z=0 Temizle
+                </label>
+                <button 
+                  onClick={() => metin_kopyala(z_temizle_sonuc ? z_degerlerini_sil(sonuc_metin) : sonuc_metin, 'sonuc')} 
+                  className="kopyala-butonu"
+                  disabled={!donusum_tamamlandi || !sonuc_metin}
+                >
+                  {sonuc_kopyalandi ? '✅ Kopyalandı' : '📋 Kopyala'}
+                </button>
+              </div>
             </div>
             <textarea 
               readOnly 
-              value={guvenli_metin_gosterimi(sonuc_metin)} 
+              value={guvenli_metin_gosterimi(z_temizle_sonuc ? z_degerlerini_sil(sonuc_metin) : sonuc_metin)} 
               placeholder="Dönüşüm tamamlandığında çıktı verisi burada görünecek..." 
             />
           </div>
 
           <div className="buton-grubu">
-            <button 
-              className="fluent-buton" 
-              disabled={!donusum_tamamlandi}
-              onClick={indir_tetikle}
-            >
+            <button className="fluent-buton" disabled={!donusum_tamamlandi} onClick={indir_tetikle}>
               ⬇️ Dosyayı İndir
             </button>
           </div>
