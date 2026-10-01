@@ -1,8 +1,10 @@
-name: GeoConverterProEA Yayımlama Aracı (GitHub Pages)
+name: Deploy static content to Pages
 
 on:
   push:
     branches: ['main']
+  # GitHub arayüzünden manuel (elle) tetiklemeye izin verir
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,22 +22,29 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Depoyu Klonla (Checkout)
+      - name: Checkout
         uses: actions/checkout@v4
-      - name: Node.js Kurulumu
+        
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Bağımlılıkları Yükle (npm install)
+          cache: 'npm'
+          
+      - name: Install dependencies
         run: npm install
-      - name: Üretim Sürümünü Derle (npm run build)
+        
+      - name: Build
         run: npm run build
-      - name: GitHub Pages Ayarları
+        
+      - name: Setup Pages
         uses: actions/configure-pages@v4
-      - name: Derlenen Kodları Yükle
+        
+      - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
-      - name: GitHub Pages Üzerinde Yayımla
+          
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
