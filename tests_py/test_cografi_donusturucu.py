@@ -226,7 +226,7 @@ class TestNetcadGml:
         cd.NetcadGMLYazici().yaz(gdf, str(cikti))
         agac = etree.parse(str(cikti))  # geçerli XML olmalı
         ns = {"T": cd.NetcadGMLYazici.TKGM_NS, "gml": cd.NetcadGMLYazici.GML_NS}
-        uyeler = agac.findall(".//T:OzelAlanZemin", ns)
+        uyeler = agac.findall(".//T:Parsel", ns)
         assert len(uyeler) == 2
         etiketler = {etree.QName(e).localname for e in uyeler[0]}
         assert {"parsel_no", "_1alan", "mahalle_köy"} <= etiketler
@@ -236,6 +236,22 @@ class TestNetcadGml:
         etiketler2 = {etree.QName(e).localname for e in uyeler[1]}
         assert "parsel_no" not in etiketler2 and "_1alan" not in etiketler2
         assert "nan" not in cikti.read_text(encoding="utf-8")
+
+    def test_tkgm_parsel_yapisi(self, tmp_path):
+        gdf = gpd.GeoDataFrame(
+            {"ada": [28439], "parsel": [5], "Açıklama": ["Hazine"], "MEGSIS_ID": [77]},
+            geometry=[Polygon([(0, 0), (1, 0), (1, 1)])], crs="EPSG:4326",
+        )
+        cikti = tmp_path / "p.gml"
+        cd.NetcadGMLYazici().yaz(gdf, str(cikti))
+        metin = cikti.read_text(encoding="utf-8")
+        assert "OzelAlanZemin" not in metin and "Açıklama" not in metin and "MEGSIS_ID" not in metin
+        uye = etree.parse(str(cikti)).find(".//{http://www.tkgm.gov.tr}Parsel")
+        sira = [etree.QName(e).localname for e in uye]
+        assert sira[:7] == ["id", "ad", "aciklama", "megsisId", "onayDurum", "takbisId", "tabaka"]
+        degerler = {etree.QName(e).localname: e.text for e in uye}
+        assert degerler["aciklama"] == "Hazine" and degerler["megsisId"] == "77"
+        assert degerler["onayDurum"] is None and degerler["takbisId"] == "0"
 
     @pytest.mark.parametrize("girdi,beklenen", [
         ("parsel no", "parsel_no"), ("1alan", "_1alan"), ("xmlAlan", "_xmlAlan"),
@@ -335,7 +351,7 @@ def _tkgm_girdisi(tmp_path):
 
 def _ad_tabaka(gml_yolu):
     kok = etree.parse(gml_yolu).getroot()
-    return [(e.find(f"{TKGM_NS}ad").text, e.find(f"{TKGM_NS}tabaka").text) for e in kok.iter(f"{TKGM_NS}OzelAlanZemin")]
+    return [(e.find(f"{TKGM_NS}ad").text, e.find(f"{TKGM_NS}tabaka").text) for e in kok.iter(f"{TKGM_NS}Parsel")]
 
 
 def test_gml_pdf_ornegi_ada_parsel_ve_tabaka(tmp_path, yonetici):

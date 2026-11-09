@@ -184,6 +184,21 @@ select:disabled {
   color: #ff8a80;
 }
 
+.metin-buton {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vurgu-renk);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.metin-buton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .format-arama {
   width: 100%;
   margin-bottom: 8px;

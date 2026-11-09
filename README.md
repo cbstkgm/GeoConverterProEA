@@ -49,6 +49,8 @@ Format kataloğunda "planlanan" olarak işaretli diğer formatlar (ör. GeoPacka
 | EPSG:5253 – 5259 | ITRF96 / 3° TM 27, 30, 33, 36, 39, 42, 45 |
 | EPSG:23035 – 23038 | ED50 / UTM 35N – 38N (Türkiye için 7 parametreli datum dönüşümü) |
 
+Hedef format **GML (Netcad / TKGM uyumlu)** seçildiğinde hedef koordinat sistemi otomatik olarak ITRF96 / 3° TM olur; dilim, verinin sınır kutusu ortasındaki boylama göre seçilir (ör. Ankara → TM 33, Trabzon → TM 39). Elle seçim yapılırsa o korunur; "Konuma göre seç" ile otomatiğe dönülür.
+
 ---
 
 ## Kurulum ve çalıştırma

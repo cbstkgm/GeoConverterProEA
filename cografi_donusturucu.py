@@ -536,6 +536,14 @@ class NetcadGMLYazici(VeriYaziciBase):
     TKGM_NS = "http://www.tkgm.gov.tr"
     GML_NS = "http://www.opengis.net/gml"
     SABIT_ALANLAR = {'geometry', 'ad', 'id', 'group_id', 'ilcead', 'geom', 'tabaka'}
+    # TKGM parsel GML'indeki standart alanlar ve veride yoksa yazılacak varsayılanlar (sırası önemli).
+    TKGM_PARSEL_ALANLARI = (('aciklama', ''), ('megsisId', '0'), ('onayDurum', ''), ('takbisId', '0'))
+
+    @classmethod
+    def standart_alan_mi(cls, ad) -> bool:
+        anahtar = sutun_anahtari(ad)
+        return (str(ad).lower() in cls.SABIT_ALANLAR
+                or any(anahtar == sutun_anahtari(alan) for alan, _ in cls.TKGM_PARSEL_ALANLARI))
 
     def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str, nokta_konum_dogrulugu=None):
         """nokta_konum_dogrulugu: verideki nkd sütunu yoksa kullanılacak varsayılan (m), ör. 0.21 -> TK_PARSEL_021."""
@@ -591,7 +599,7 @@ class NetcadGMLYazici(VeriYaziciBase):
         kullanilan_adlar = set(self.SABIT_ALANLAR)
         xml_adlari = {}
         for kolon in toplanmis_gdf.columns:
-            if str(kolon).lower() in self.SABIT_ALANLAR:
+            if self.standart_alan_mi(kolon):
                 continue
             xml_adlari[kolon] = gecerli_xml_adi(kolon, kullanilan_adlar)
             if xml_adlari[kolon] != str(kolon):
@@ -621,7 +629,8 @@ class NetcadGMLYazici(VeriYaziciBase):
                     continue
 
                 ozellik_elemani = etree.SubElement(kok_eleman, f"{{{TKGM}}}FeatureMember")
-                ozel_alan = etree.SubElement(ozellik_elemani, f"{{{TKGM}}}OzelAlanZemin")
+                # Netcad bu obje tipini TK_PARSEL katmanına alır (TKGM parsel GML'iyle aynı yapı).
+                ozel_alan = etree.SubElement(ozellik_elemani, f"{{{TKGM}}}Parsel")
                 etree.SubElement(ozel_alan, f"{{{TKGM}}}id").text = str(id_degeri)
                 ozellikler = {k: satir[k] for k in satir.index if k != 'geometry'}
                 ada_parsel = ada_parsel_adi(ozellikler)
@@ -632,6 +641,12 @@ class NetcadGMLYazici(VeriYaziciBase):
                 else:
                     ad = ada_parsel
                 etree.SubElement(ozel_alan, f"{{{TKGM}}}ad").text = str(ad)
+                for alan, varsayilan in self.TKGM_PARSEL_ALANLARI:
+                    deger = sutun_degeri(ozellikler, [sutun_anahtari(alan)])
+                    metin = varsayilan if deger is None else str(deger)
+                    eleman = etree.SubElement(ozel_alan, f"{{{TKGM}}}{alan}")
+                    if metin != '':
+                        eleman.text = metin
                 tabaka, kaynak = obje_tabakasi(ozellikler, nokta_konum_dogrulugu)
                 tabaka_sayaci[tabaka] = tabaka_sayaci.get(tabaka, 0) + 1
                 if kaynak == "yok":

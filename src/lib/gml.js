@@ -6,8 +6,10 @@
  *
  *   <TKGM:FeatureCollection xmlns:TKGM="http://www.tkgm.gov.tr" xmlns:gml="http://www.opengis.net/gml">
  *     <TKGM:FeatureMember>
- *       <TKGM:OzelAlanZemin>
- *         <TKGM:id>…</TKGM:id> <TKGM:ad>ada/parsel</TKGM:ad> <TKGM:tabaka>TK_PARSEL_abc</TKGM:tabaka>
+ *       <TKGM:Parsel>   (Netcad bu obje tipini TK_PARSEL katmanına alır; TKGM parsel GML'iyle aynı)
+ *         <TKGM:id>…</TKGM:id> <TKGM:ad>ada/parsel</TKGM:ad>
+ *         <TKGM:aciklama/> <TKGM:megsisId>0</TKGM:megsisId> <TKGM:onayDurum/> <TKGM:takbisId>0</TKGM:takbisId>
+ *         <TKGM:tabaka>TK_PARSEL_abc</TKGM:tabaka>
  *         <TKGM:{öznitelik}>…</TKGM:{öznitelik}> …
  *         <TKGM:geom> gml:Polygon | gml:MultiPolygon (GML 2: outer/innerBoundaryIs, "x,y x,y") </TKGM:geom>
  *
@@ -25,6 +27,18 @@
 const TKGM_NS = 'http://www.tkgm.gov.tr'
 const GML_NS = 'http://www.opengis.net/gml'
 const SABIT_ALANLAR = new Set(['geometry', 'ad', 'id', 'group_id', 'ilcead', 'geom', 'tabaka'])
+
+/** TKGM parsel GML'indeki standart alanlar ve veride yoksa yazılacak varsayılanları (sırası önemli). */
+export const TKGM_PARSEL_ALANLARI = Object.freeze([
+  ['aciklama', ''],
+  ['megsisId', '0'],
+  ['onayDurum', ''],
+  ['takbisId', '0'],
+])
+
+/** XML eleman satırı; boş değer TKGM örneğindeki gibi kendini kapatan eleman olarak yazılır. */
+const elemanSatiri = (girinti, ad, deger) =>
+  deger === '' ? `${girinti}<TKGM:${ad}/>` : `${girinti}<TKGM:${ad}>${xmlKacis(deger)}</TKGM:${ad}>`
 
 // ---------------------------------------------------------------------------
 // TKGM adlandırma (Kadastro Dairesi Başkanlığı, GML Converter 7.2 Güncelleme Notları)
@@ -45,6 +59,10 @@ const ADA_PARSEL_SUTUNLARI = ['adaparsel', 'adaparselno', 'parseladi', 'adi']
 const NKD_SUTUNLARI = ['nkd', 'noktakonumdogrulugu', 'konumdogrulugu', 'noktakonumdogruluk', 'nktkonumdogrulugu']
 const TABAKA_SUTUNLARI = ['tabaka', 'katman', 'layer', 'tabakaadi']
 const TABAKA_DESENI = /^TK_PARSEL(?:_\d{3})?$/i
+
+// "Açıklama", "MEGSIS_ID" gibi yazımlar da standart alana sayılır; ek öznitelik olarak tekrar yazılmaz.
+const STANDART_ANAHTARLAR = new Set(TKGM_PARSEL_ALANLARI.map(([alan]) => sutunAnahtari(alan)))
+const standartAlanMi = (ad) => SABIT_ALANLAR.has(String(ad).toLowerCase()) || STANDART_ANAHTARLAR.has(sutunAnahtari(ad))
 
 /** Özellik nesnesinde aday adlardan ilk bulunanın değerini döndürür. */
 function sutunDegeri(ozellikler, adaylar) {
@@ -239,7 +257,7 @@ export function netcadGmlYaz(fc, secenekler = {}) {
   const xmlAdlari = new Map()
   for (const g of siraliGruplar) {
     for (const anahtar of Object.keys(g.ozellikler)) {
-      if (xmlAdlari.has(anahtar) || SABIT_ALANLAR.has(anahtar.toLowerCase())) continue
+      if (xmlAdlari.has(anahtar) || standartAlanMi(anahtar)) continue
       xmlAdlari.set(anahtar, gecerliXmlAdi(anahtar, kullanilan))
     }
   }
@@ -267,11 +285,15 @@ export function netcadGmlYaz(fc, secenekler = {}) {
     if (kaynak === 'yok') tabakasiz++
     satirlar.push(
       '  <TKGM:FeatureMember>',
-      '    <TKGM:OzelAlanZemin>',
+      '    <TKGM:Parsel>',
       `      <TKGM:id>${xmlKacis(g.id)}</TKGM:id>`,
       `      <TKGM:ad>${xmlKacis(ad)}</TKGM:ad>`,
-      `      <TKGM:tabaka>${xmlKacis(tabaka)}</TKGM:tabaka>`,
     )
+    for (const [alan, varsayilan] of TKGM_PARSEL_ALANLARI) {
+      const deger = sutunDegeri(g.ozellikler, [sutunAnahtari(alan)])
+      satirlar.push(elemanSatiri('      ', alan, deger === undefined ? varsayilan : degerMetni(deger)))
+    }
+    satirlar.push(`      <TKGM:tabaka>${xmlKacis(tabaka)}</TKGM:tabaka>`)
     for (const [anahtar, xmlAdi] of xmlAdlari) {
       const deger = g.ozellikler[anahtar]
       if (bosMu(deger)) continue
@@ -287,7 +309,7 @@ export function netcadGmlYaz(fc, secenekler = {}) {
       }
       satirlar.push('        </gml:MultiPolygon>')
     }
-    satirlar.push('      </TKGM:geom>', '    </TKGM:OzelAlanZemin>', '  </TKGM:FeatureMember>')
+    satirlar.push('      </TKGM:geom>', '    </TKGM:Parsel>', '  </TKGM:FeatureMember>')
   }
   satirlar.push('</TKGM:FeatureCollection>', '')
 

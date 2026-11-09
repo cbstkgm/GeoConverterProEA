@@ -4,7 +4,7 @@ import { tabakaAdi } from '../lib/gml';
 
 const HASSASIYETLER = [2, 3, 4, 5, 6, 7, 8];
 
-function CrsSecici({ id, etiket, deger, onDegistir, devreDisi, not }) {
+function CrsSecici({ id, etiket, deger, onDegistir, devreDisi, not, notHata, eylem }) {
   return (
     <div className="form-grubu">
       <label htmlFor={id}>{etiket}</label>
@@ -22,8 +22,16 @@ function CrsSecici({ id, etiket, deger, onDegistir, devreDisi, not }) {
         ))}
       </select>
       {not && (
-        <small id={`${id}-not`} className="alan-notu">
+        <small id={`${id}-not`} className={`alan-notu${notHata ? ' alan-notu-hata' : ''}`}>
           {not}
+          {eylem && (
+            <>
+              {' '}
+              <button type="button" className="metin-buton" onClick={eylem.onTikla} disabled={devreDisi}>
+                {eylem.etiket}
+              </button>
+            </>
+          )}
         </small>
       )}
     </div>
@@ -68,6 +76,8 @@ export default function DonusumPaneli({
   hedefCrs,
   onHedefCrs,
   hedefCrsKilitli,
+  hedefCrsNotu,
+  onHedefCrsOtomatik,
   zTemizle,
   onZTemizle,
   hassasiyet,
@@ -107,7 +117,9 @@ export default function DonusumPaneli({
           deger={hedefCrs}
           onDegistir={onHedefCrs}
           devreDisi={mesgul || hedefCrsKilitli}
-          not={hedefCrsKilitli ? 'KML/KMZ standardı yalnızca WGS84 (EPSG:4326) koordinatlarını kabul eder.' : null}
+          not={hedefCrsNotu?.metin ?? null}
+          notHata={Boolean(hedefCrsNotu?.hata)}
+          eylem={onHedefCrsOtomatik ? { etiket: 'Konuma göre seç', onTikla: onHedefCrsOtomatik } : null}
         />
       </div>
 

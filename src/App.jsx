@@ -8,6 +8,7 @@ import MetinOnizleme from './components/MetinOnizleme';
 import IstatistikKarti from './components/IstatistikKarti';
 import Bildirim from './components/Bildirim';
 import { WGS84, wgs84ZorunluMu } from './lib/katalog';
+import { itrf96Mi, veridenItrf96Dilimi } from './lib/dilim';
 import './App.css';
 const KAYNAK_RENK = '#ff4c4c';
 const SONUC_RENK = '#4cc2ff';
@@ -32,20 +33,60 @@ function dosyayiIndir(veri, mime, ad) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+const ondalik = (sayi) => sayi.toFixed(2).replace('.', ',');
+
+function hedefCrsNotuOlustur({ hedefCrsKilitli, tkgmModu, tkgmOtomatik, otomatikDilim, hedefCrs }) {
+  if (hedefCrsKilitli) return { metin: 'KML/KMZ standardı yalnızca WGS84 (EPSG:4326) koordinatlarını kabul eder.' };
+  if (!tkgmModu) return null;
+  if (!tkgmOtomatik) {
+    return itrf96Mi(hedefCrs)
+      ? { metin: 'Hedef koordinat sistemi elle seçildi.' }
+      : { metin: 'TKGM uyumlu GML için ITRF96 / 3° TM önerilir; seçilen sistem TKGM ile uyumsuz olabilir.', hata: true };
+  }
+  if (!otomatikDilim) {
+    return { metin: 'TKGM uyumlu GML: ITRF96 / 3° TM. Veri yüklendiğinde dilim, verinin konumuna göre otomatik seçilir.' };
+  }
+  let metin = `TKGM uyumlu GML: dilim veri konumuna göre otomatik seçildi (orta boylam ${ondalik(otomatikDilim.boylam)}° → TM ${otomatikDilim.dom}).`;
+  if (otomatikDilim.disarida) metin += ' Veri Türkiye dilimlerinin dışında; en yakın dilim seçildi.';
+  else if (otomatikDilim.coklu) metin += ` Veri birden çok dilime yayılıyor (DOM ${otomatikDilim.dilimler.join(', ')}); orta dilim kullanıldı.`;
+  return { metin, hata: otomatikDilim.disarida };
+}
+
 function App() {
   const { oku, donustur, wgs84e, mesgul, ilerleme } = useDonusturucu();
 
   const [dosya, setDosya] = useState(null);
   const [kaynak, setKaynak] = useState(null); // { geojson, uyarilar, istatistik, tahminiCrs }
-  const [kaynakHarita, setKaynakHarita] = useState(null);
   const [sonuc, setSonuc] = useState(null); // { sonuc, haritaGeojson, istatistik }
 
   const [hedefFormat, setHedefFormat] = useState(VARSAYILAN_HEDEF);
   const [kaynakCrs, setKaynakCrs] = useState(WGS84);
-  const [secilenHedefCrs, setHedefCrs] = useState(WGS84);
+  const [secilenHedefCrs, setSecilenHedefCrs] = useState(WGS84);
+  // TKGM GML'de hedef CRS veri konumuna göre otomatik seçilir; kullanıcı elle değiştirirse o korunur.
+  const [hedefCrsElle, setHedefCrsElle] = useState(false);
+  const [kaynakHarita, setKaynakHarita] = useState(null);
+  const otomatikDilim = useMemo(() => (kaynakHarita ? veridenItrf96Dilimi(kaynakHarita) : null), [kaynakHarita]);
+  const tkgmModu = hedefFormat === '.gml';
+  const tkgmOtomatik = tkgmModu && !hedefCrsElle;
   // KML/KMZ yalnızca WGS84 taşıyabilir: bu formatlarda kullanıcının seçimi korunur ama uygulanmaz.
   const hedefCrsKilitli = wgs84ZorunluMu(hedefFormat);
-  const hedefCrs = hedefCrsKilitli ? WGS84 : secilenHedefCrs;
+  let hedefCrs = secilenHedefCrs;
+  if (hedefCrsKilitli) hedefCrs = WGS84;
+  else if (tkgmOtomatik) {
+    hedefCrs =
+      otomatikDilim?.kod ??
+      (itrf96Mi(kaynakCrs) ? kaynakCrs : itrf96Mi(secilenHedefCrs) ? secilenHedefCrs : 'EPSG:5255');
+  }
+  const hedefCrsNotu = hedefCrsNotuOlustur({ hedefCrsKilitli, tkgmModu, tkgmOtomatik, otomatikDilim, hedefCrs });
+
+  const hedefCrsSecildi = (crs) => {
+    setSecilenHedefCrs(crs);
+    if (tkgmModu) setHedefCrsElle(true);
+  };
+  const hedefFormatSecildi = (uzanti) => {
+    setHedefFormat(uzanti);
+    setHedefCrsElle(false);
+  };
   // Varsayılan: Z (yükseklik) değerleri olmadan, 2B çıktı.
   const [zTemizle, setZTemizle] = useState(true);
   const [hassasiyet, setHassasiyet] = useState(null);
@@ -76,6 +117,7 @@ function App() {
   const dosyaSecildi = async (yeniDosya) => {
     const no = ++istekNo.current;
     setDosya(yeniDosya);
+    setHedefCrsElle(false);
     setKaynak(null);
     setKaynakHarita(null);
     setSonuc(null);
@@ -185,12 +227,14 @@ function App() {
 
         <DonusumPaneli
           hedefFormat={hedefFormat}
-          onHedefFormat={setHedefFormat}
+          onHedefFormat={hedefFormatSecildi}
           kaynakCrs={kaynakCrs}
           onKaynakCrs={kaynakCrsDegisti}
           hedefCrs={hedefCrs}
-          onHedefCrs={setHedefCrs}
+          onHedefCrs={hedefCrsSecildi}
           hedefCrsKilitli={hedefCrsKilitli}
+          hedefCrsNotu={hedefCrsNotu}
+          onHedefCrsOtomatik={tkgmModu && hedefCrsElle ? () => setHedefCrsElle(false) : null}
           zTemizle={zTemizle}
           onZTemizle={setZTemizle}
           hassasiyet={hassasiyet}

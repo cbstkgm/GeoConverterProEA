@@ -15,7 +15,7 @@ function ayristir(metin) {
   expect(hatalar).toEqual([])
   return doc
 }
-const uyeler = (doc) => Array.from(doc.getElementsByTagNameNS(TKGM, 'OzelAlanZemin'))
+const uyeler = (doc) => Array.from(doc.getElementsByTagNameNS(TKGM, 'Parsel'))
 const alan = (el, ad) => el.getElementsByTagNameNS(TKGM, ad)[0]?.textContent
 
 describe('netcadGmlYaz', () => {
@@ -94,6 +94,34 @@ describe('netcadGmlYaz', () => {
     expect(uyarilar.join(' ')).toMatch(/3 poligon olmayan geometri/)
     expect(uyarilar.join(' ')).toMatch(/Çizgi → Poligon/)
     expect(uyarilar.join(' ')).toMatch(/1 geometrisiz obje/)
+  })
+
+  it('TKGM parsel GML yapısı: obje tipi Parsel, standart alanlar örnek dosyadaki sırada', () => {
+    const { metin } = netcadGmlYaz(fc(obje({ type: 'Polygon', coordinates: [kare(0, 0, 1)] }, { ada: 28439, parsel: 5 })))
+    expect(metin).toContain(
+      [
+        '    <TKGM:Parsel>',
+        '      <TKGM:id>0</TKGM:id>',
+        '      <TKGM:ad>28439/5</TKGM:ad>',
+        '      <TKGM:aciklama/>',
+        '      <TKGM:megsisId>0</TKGM:megsisId>',
+        '      <TKGM:onayDurum/>',
+        '      <TKGM:takbisId>0</TKGM:takbisId>',
+        '      <TKGM:tabaka>TK_PARSEL</TKGM:tabaka>',
+      ].join('\n'),
+    )
+    expect(metin).not.toContain('OzelAlanZemin')
+  })
+
+  it('standart alanlar veride varsa (farklı yazımla da) oradan alınır ve tekrar yazılmaz', () => {
+    const { metin } = netcadGmlYaz(
+      fc(obje({ type: 'Polygon', coordinates: [kare(0, 0, 1)] }, { 'Açıklama': 'Hazine', MEGSIS_ID: 77, takbisId: '' })),
+    )
+    const [u] = uyeler(ayristir(metin))
+    expect(alan(u, 'aciklama')).toBe('Hazine')
+    expect(alan(u, 'megsisId')).toBe('77')
+    expect(alan(u, 'takbisId')).toBe('0')
+    expect(metin).not.toMatch(/Açıklama|MEGSIS_ID/)
   })
 
   it('hiç poligon yoksa yönlendirici hata verir', () => {
