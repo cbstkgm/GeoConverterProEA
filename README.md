@@ -2,7 +2,7 @@
 
 GeoConverterProEA, CBS (Coğrafi Bilgi Sistemi) verilerini **tamamen tarayıcıda** okuyan, koordinat sistemleri arasında dönüştüren, haritada gösteren ve farklı formatlarda dışa aktaran bir web uygulamasıdır. Dosyalarınız hiçbir sunucuya gönderilmez.
 
-**Canlı sürüm:** https://cbstkgm.github.io/GeoConverterProEA/
+**Canlı sürüm:** https://erdemalpar.github.io/GeoConverterProEA/
 
 ---
 
@@ -58,7 +58,7 @@ Hedef format **GML (Netcad / TKGM uyumlu)** seçildiğinde hedef koordinat siste
 Node.js 22 veya üstü gerekir.
 
 ```bash
-git clone https://github.com/cbstkgm/GeoConverterProEA.git
+git clone https://github.com/erdemalpar/GeoConverterProEA.git
 cd GeoConverterProEA
 npm ci
 npm start          # geliştirme sunucusu (npm run dev ile aynı)
