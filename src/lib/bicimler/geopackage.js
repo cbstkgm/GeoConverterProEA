@@ -7,11 +7,13 @@
 // Not: sql.js derlemesinde SQLite rtree modülü bulunmadığından R-tree uzamsal indeks yazılmaz
 // (indeks isteğe bağlıdır; QGIS/GDAL dosyayı indekssiz açar, gerekirse kendisi oluşturur).
 
+import { cokluyaYukselt, geometriTipiPolitikasi } from './wkb.js'
+
 const GPKG_APPLICATION_ID = 0x47504b47 // 'GPKG'
 const GPKG_USER_VERSION = 10300 // 1.3.0
 const VARSAYILAN_TABLO = 'objeler'
-const GEOMETRI_SUTUNU = 'geom'
-const KIMLIK_SUTUNU = 'fid'
+export const GEOMETRI_SUTUNU = 'geom'
+export const KIMLIK_SUTUNU = 'fid'
 
 // ---------------------------------------------------------------------------
 // sql.js başlatma (modül düzeyinde önbellek)
@@ -23,7 +25,7 @@ let sqlSozu = null
  * sql.js'i bir kez yükler. Tarayıcı/worker'da `sqlWasmUrl` verilmelidir (Vite: `?url` import);
  * verilmezse paket kendi konumundan yükler (Node).
  */
-function sqlJsYukle(sqlWasmUrl) {
+export function sqlJsYukle(sqlWasmUrl) {
   if (!sqlSozu) {
     sqlSozu = (async () => {
       const modul = await import('sql.js')
@@ -69,7 +71,7 @@ const tmerc = (ad, geogcs, dom, olcek, kod) =>
   `PARAMETER["false_northing",0],${METRE},${EN_BOY},${yetki(kod)}]`
 
 /** srs_id → { ad, tanim, aciklama } */
-const SRS_TANIMLARI = new Map([
+export const SRS_TANIMLARI = new Map([
   [4326, { ad: 'WGS 84 geodetic', tanim: WGS84_GEOGCS, aciklama: 'longitude/latitude coordinates in decimal degrees on the WGS 84 spheroid' }],
   [
     3857,
@@ -93,7 +95,7 @@ const SRS_TANIMLARI = new Map([
   SRS_TANIMLARI.set(kod, { ad, tanim: tmerc(ad, ED50_GEOGCS, zon * 6 - 183, 0.9996, kod), aciklama: ad })
 })
 
-function srsCoz(crs, uyarilar) {
+export function srsCoz(crs, uyarilar) {
   if (crs == null || crs === '') {
     uyarilar.push('Hedef koordinat sistemi belirtilmedi; GeoPackage EPSG:4326 (WGS84) olarak yazıldı.')
     return 4326
@@ -113,7 +115,7 @@ function srsCoz(crs, uyarilar) {
 const WKB_KODLARI = { Point: 1, LineString: 2, Polygon: 3, MultiPoint: 4, MultiLineString: 5, MultiPolygon: 6, GeometryCollection: 7 }
 
 /** Basit büyüyen little-endian bayt yazıcı. */
-class BaytYazici {
+export class BaytYazici {
   constructor(boyut = 256) {
     this.tampon = new Uint8Array(boyut)
     this.dv = new DataView(this.tampon.buffer)
@@ -154,7 +156,7 @@ class BaytYazici {
 }
 
 /** Geometrideki tüm konumları gezer. */
-function konumlariGez(g, fn) {
+export function konumlariGez(g, fn) {
   if (!g) return
   if (g.type === 'GeometryCollection') {
     for (const alt of g.geometries || []) konumlariGez(alt, fn)
@@ -173,7 +175,7 @@ function konumlariGez(g, fn) {
 }
 
 /** Geometriyi inceler: Z var mı, M (4. boyut) var mı, zarf, boş mu, sayılar geçerli mi. */
-function geometriIncele(g) {
+export function geometriIncele(g) {
   let z = false
   let m = false
   let sayi = 0
@@ -290,8 +292,9 @@ export function geopackageGeometrisi(g, srsId) {
 // Geometri aileleri, Multi'ye yükseltme ve tablo bölme
 // ---------------------------------------------------------------------------
 
-const AILE_SIRASI = ['nokta', 'cizgi', 'poligon', 'karisik']
-const AILELER = {
+export const AILE_SIRASI = ['nokta', 'cizgi', 'poligon', 'karisik']
+/** GeoJSON tipi → aile (tablo son eki). */
+export const AILELER = {
   Point: 'nokta',
   MultiPoint: 'nokta',
   LineString: 'cizgi',
@@ -299,41 +302,24 @@ const AILELER = {
   Polygon: 'poligon',
   MultiPolygon: 'poligon',
 }
-const TEKIL_COKLU = { Point: 'MultiPoint', LineString: 'MultiLineString', Polygon: 'MultiPolygon' }
-const AILE_COKLU = { nokta: 'MultiPoint', cizgi: 'MultiLineString', poligon: 'MultiPolygon' }
+/** Aile → wkb.js politikasındaki temel tip adı. */
+const AILE_TEMEL_TIP = { nokta: 'Point', cizgi: 'LineString', poligon: 'Polygon' }
 
 const dolu = (c) => Array.isArray(c) && c.length > 0
 
 /** GeometryCollection'ı (iç içe olanlar dahil) boş olmayan basit parçalarına açar. */
-function parcalaraAc(g, cikti = []) {
+export function parcalaraAc(g, cikti = []) {
   if (!g) return cikti
   if (g.type === 'GeometryCollection') for (const alt of g.geometries || []) parcalaraAc(alt, cikti)
   else if (dolu(g.coordinates)) cikti.push(g)
   return cikti
 }
 
-/** Basit parçaları tek ailenin Multi geometrisinde birleştirir. */
-function multiyeBirlestir(aile, parcalar) {
-  const coordinates = []
-  for (const p of parcalar) {
-    if (TEKIL_COKLU[p.type]) coordinates.push(p.coordinates)
-    else coordinates.push(...p.coordinates)
-  }
-  return { type: AILE_COKLU[aile], coordinates }
-}
-
-/** Tekil geometriyi aynı ailenin çoklusuna yükseltir (ogr2ogr -nlt PROMOTE_TO_MULTI). */
-function multiyeYukselt(g) {
-  const coklu = TEKIL_COKLU[g.type]
-  if (!coklu) return g
-  return { type: coklu, coordinates: dolu(g.coordinates) ? [g.coordinates] : [] }
-}
-
 // ---------------------------------------------------------------------------
 // Öznitelik sütunları
 // ---------------------------------------------------------------------------
 
-const tirnakla = (ad) => `"${String(ad).replace(/"/g, '""')}"`
+export const tirnakla = (ad) => `"${String(ad).replace(/"/g, '""')}"`
 const TARIH = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 const TARIH_ZAMAN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?Z?$/
 
@@ -367,7 +353,7 @@ function tipBirlestir(a, b) {
  * Öznitelik anahtarlarından SQLite sütunlarını çıkarır. SQLite sütun adları büyük/küçük harf
  * duyarsızdır; rezerve adlar (fid, geom) ve çakışmalar `_1`, `_2`… ekiyle çözülür.
  */
-function sutunlariCikar(objeler, uyar) {
+export function sutunlariCikar(objeler, uyar) {
   const tipler = new Map() // anahtar → tip
   const guvensiz = new Set()
   for (const f of objeler) {
@@ -404,7 +390,7 @@ function sutunlariCikar(objeler, uyar) {
   return sutunlar
 }
 
-function degerDonustur(v, tip) {
+export function degerDonustur(v, tip) {
   if (v == null) return null
   if (typeof v === 'object') return JSON.stringify(v)
   switch (tip) {
@@ -418,7 +404,7 @@ function degerDonustur(v, tip) {
   }
 }
 
-function tabloAdiBelirle(istenen, uyar) {
+export function tabloAdiBelirle(istenen, uyar) {
   if (istenen == null || istenen === '') return VARSAYILAN_TABLO
   let ad = String(istenen).trim().replace(/[^\p{L}\p{N}_]/gu, '_')
   if (!/^\p{L}/u.test(ad)) ad = `t_${ad}`
@@ -435,7 +421,7 @@ function tabloAdiBelirle(istenen, uyar) {
  * - null/boş/yazılamayan geometriler: ilk tabloya NULL geom ile (öznitelikleri kaybolmasın;
  *   yalnızca bunlar için GEOMETRY tipli ek tablo açmak ArcGIS uyumunu bozardı).
  */
-function tablolaraDagit(objeler, tabanAd, uyar) {
+export function tablolaraDagit(objeler, tabanAd, uyar) {
   const kayitlar = [] // { f, g, aile }
   let gecersiz = 0
   let gcCevrildi = 0
@@ -455,7 +441,7 @@ function tablolaraDagit(objeler, tabanAd, uyar) {
             gcBos++
           } else if (aileler.size === 1) {
             aile = [...aileler][0]
-            g = multiyeBirlestir(aile, parcalar)
+            g = cokluyaYukselt({ type: 'GeometryCollection', geometries: parcalar }, AILE_TEMEL_TIP[aile])
             gcCevrildi++
           } else {
             aile = 'karisik'
@@ -496,24 +482,19 @@ function tablolaraDagit(objeler, tabanAd, uyar) {
   }
   if (gcKarisik) uyar(`${gcKarisik} GeometryCollection farklı aileden parçalar içerdiği için "${tabloBul.get('karisik').ad}" (GEOMETRY tipli) tablosuna yazıldı.`)
 
-  // Tablo tipi: aynı ailede tekil+çoklu karışıksa Multi'ye yükselt.
+  // Tablo tipi: wkb.js geometriTipiPolitikasi (aynı ailede tekil+çoklu karışıksa Multi'ye yükselt).
   for (const t of tablolar) {
-    const tipler = new Set(t.kayitlar.filter((k) => k.g).map((k) => k.g.type))
-    if (!t.aile || t.aile === 'karisik' || tipler.size === 0) {
-      t.tip = t.aile && t.aile !== 'karisik' && tipler.size === 1 ? [...tipler][0].toUpperCase() : 'GEOMETRY'
+    const dolular = t.kayitlar.filter((k) => k.g)
+    if (!t.aile || t.aile === 'karisik' || !dolular.length) {
+      t.tip = 'GEOMETRY'
       continue
     }
-    if (tipler.size > 1) {
-      let yukseltilen = 0
-      for (const k of t.kayitlar) {
-        if (k.g && TEKIL_COKLU[k.g.type]) {
-          k.g = multiyeYukselt(k.g)
-          yukseltilen++
-        }
-      }
-      t.tip = AILE_COKLU[t.aile].toUpperCase()
-      uyar(`"${t.ad}" tablosunda tekil ve çoklu geometriler karışık; ${yukseltilen} tekil geometri ${AILE_COKLU[t.aile]} tipine yükseltildi.`)
-    } else t.tip = [...tipler][0].toUpperCase()
+    const politika = geometriTipiPolitikasi(dolular.map((k) => k.g))
+    t.tip = politika.tip.toUpperCase()
+    if (politika.yukseltilen || politika.duzlestirilen) {
+      for (const k of dolular) k.g = politika.donustur(k.g)
+      if (politika.yukseltilen) uyar(`"${t.ad}" tablosunda tekil ve çoklu geometriler karışık; ${politika.yukseltilen} tekil geometri ${politika.tip} tipine yükseltildi.`)
+    }
   }
   return tablolar
 }

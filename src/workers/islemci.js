@@ -7,9 +7,10 @@ import { dosyaOku } from '../lib/okuyucular.js';
 import { dosyaYaz } from '../lib/yazicilar.js';
 import { zDegerleriniKaldir, hassasiyetUygula, istatistikHesapla, geometriTipiDonustur } from '../lib/geometri.js';
 import { koordinatDonustur, wgs84OlabilirMi } from '../lib/projeksiyon.js';
-import { WGS84, wgs84ZorunluMu } from '../lib/katalog.js';
+import { WGS84, zorunluCrs } from '../lib/katalog.js';
 import { gecerlilikDenetle } from '../lib/gecerlilik.js';
 import { SQL_WASM_URL } from '../lib/sqlWasm.js';
+import { RHINO_WASM_URL } from '../lib/rhinoWasm.js';
 
 export { WGS84 };
 
@@ -116,9 +117,11 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
     secenekler || {};
   crsDogrula(kaynakCrs, 'kaynak');
   crsDogrula(hedefCrs, 'hedef');
-  if (wgs84ZorunluMu(hedefUzanti) && hedefCrs.trim().toUpperCase() !== WGS84) {
+  const formatCrs = zorunluCrs(hedefUzanti);
+  if (formatCrs && hedefCrs.trim().toUpperCase() !== formatCrs.kod) {
+    const ad = formatCrs.kod === WGS84 ? 'WGS84 (EPSG:4326)' : formatCrs.kod;
     throw new Error(
-      `${hedefUzanti.trim().toUpperCase()} çıktısı yalnızca WGS84 (EPSG:4326) koordinatları taşıyabilir; hedef koordinat sistemi olarak ${hedefCrs} seçilemez.`,
+      `${hedefUzanti.trim().toUpperCase()} çıktısı yalnızca ${ad} koordinatları taşıyabilir; hedef koordinat sistemi olarak ${hedefCrs} seçilemez.`,
     );
   }
 
@@ -160,6 +163,7 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
     crs: hedefCrs,
     haritaGeojson,
     sqlWasmUrl: SQL_WASM_URL,
+    rhinoWasmUrl: RHINO_WASM_URL,
     etiketler: true,
   });
   if (Array.isArray(sonuc.uyarilar)) uyarilar.push(...sonuc.uyarilar);

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { oku, donustur, wgs84e, istekIsle } from './islemci.js';
+import { DESTEKLENEN_CIKTILAR } from '../lib/katalog.js';
 
 const kodla = (metin) => {
   const u8 = new TextEncoder().encode(metin);
@@ -292,7 +293,7 @@ describe('islemci — yeni çıktı formatları (hedef CRS yazıcıya ulaşır)'
   const tm33 = { kaynakCrs: 'EPSG:4326', hedefCrs: 'EPSG:5255' };
 
   it('her yeni format ITRF96 TM33 hedefiyle yazılır', async () => {
-    for (const uzanti of ['.dxf', '.zip', '.gpkg', '.wkb', '.sql', '.xyz', '.html', '.md']) {
+    for (const uzanti of DESTEKLENEN_CIKTILAR.map((c) => c.uzanti).filter((u) => !['.kml', '.kmz', '.mvt', '.pbf', '.gml'].includes(u))) {
       const { sonuc } = await donustur(ornekFc(), uzanti, tm33);
       expect(sonuc.uzanti).toBe(uzanti);
       expect(sonuc.veri.length).toBeGreaterThan(0);

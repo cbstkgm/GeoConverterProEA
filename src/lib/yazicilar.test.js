@@ -66,18 +66,22 @@ describe('dosyaYaz — genel', () => {
     for (const c of DESTEKLENEN_CIKTILAR) await dosyaYaz(fc, c.uzanti);
     expect(fc).toEqual(kopya);
   });
-  it('boş FeatureCollection her formatta yazılabilir (GML: poligon şart; Shapefile: en az bir obje şart)', async () => {
+  it('boş FeatureCollection her formatta yazılır ya da anlaşılır bir hata verir', async () => {
+    // Boş veriyi temsil edemeyen formatlar bilinçli olarak açıklayıcı hata verir.
+    const bosuReddeden = {
+      '.gml': /poligon bulunamadı/,
+      '.zip': /hiç obje içermiyor/,
+      '.ptx': /nokta yok/,
+      '.nc': /./,
+    };
     for (const c of DESTEKLENEN_CIKTILAR) {
       const bos = { type: 'FeatureCollection', features: [] };
-      if (c.uzanti === '.gml') {
-        await expect(dosyaYaz(bos, c.uzanti)).rejects.toThrow(/poligon bulunamadı/);
+      const sec = c.uzanti === '.mvt' || c.uzanti === '.pbf' ? { crs: 'EPSG:3857' } : { crs: 'EPSG:5255' };
+      if (bosuReddeden[c.uzanti]) {
+        await expect(dosyaYaz(bos, c.uzanti, sec), c.uzanti).rejects.toThrow(bosuReddeden[c.uzanti]);
         continue;
       }
-      if (c.uzanti === '.zip') {
-        await expect(dosyaYaz(bos, c.uzanti)).rejects.toThrow(/hiç obje içermiyor/);
-        continue;
-      }
-      const s = await dosyaYaz(bos, c.uzanti);
+      const s = await dosyaYaz(bos, c.uzanti, sec);
       expect(s.mime).toBe(c.mime);
     }
   });

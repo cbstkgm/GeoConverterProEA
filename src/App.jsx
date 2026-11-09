@@ -7,7 +7,7 @@ import { VARSAYILAN_HEDEF } from './components/formatSecenekleri';
 import MetinOnizleme from './components/MetinOnizleme';
 import IstatistikKarti from './components/IstatistikKarti';
 import Bildirim from './components/Bildirim';
-import { WGS84, wgs84ZorunluMu } from './lib/katalog';
+import { WGS84, zorunluCrs } from './lib/katalog';
 import { itrf96Mi, veridenItrf96Dilimi } from './lib/dilim';
 import './App.css';
 const KAYNAK_RENK = '#ff4c4c';
@@ -35,8 +35,8 @@ function dosyayiIndir(veri, mime, ad) {
 
 const ondalik = (sayi) => sayi.toFixed(2).replace('.', ',');
 
-function hedefCrsNotuOlustur({ hedefCrsKilitli, tkgmModu, tkgmOtomatik, otomatikDilim, hedefCrs }) {
-  if (hedefCrsKilitli) return { metin: 'KML/KMZ standardı yalnızca WGS84 (EPSG:4326) koordinatlarını kabul eder.' };
+function hedefCrsNotuOlustur({ formatCrs, tkgmModu, tkgmOtomatik, otomatikDilim, hedefCrs }) {
+  if (formatCrs) return { metin: formatCrs.not };
   if (!tkgmModu) return null;
   if (!tkgmOtomatik) {
     return itrf96Mi(hedefCrs)
@@ -68,16 +68,17 @@ function App() {
   const otomatikDilim = useMemo(() => (kaynakHarita ? veridenItrf96Dilimi(kaynakHarita) : null), [kaynakHarita]);
   const tkgmModu = hedefFormat === '.gml';
   const tkgmOtomatik = tkgmModu && !hedefCrsElle;
-  // KML/KMZ yalnızca WGS84 taşıyabilir: bu formatlarda kullanıcının seçimi korunur ama uygulanmaz.
-  const hedefCrsKilitli = wgs84ZorunluMu(hedefFormat);
+  // KML/KMZ (WGS84) ve MVT (Web Mercator) CRS'i formatın kendisi belirler: kullanıcının seçimi korunur ama uygulanmaz.
+  const formatCrs = zorunluCrs(hedefFormat);
+  const hedefCrsKilitli = formatCrs !== null;
   let hedefCrs = secilenHedefCrs;
-  if (hedefCrsKilitli) hedefCrs = WGS84;
+  if (formatCrs) hedefCrs = formatCrs.kod;
   else if (tkgmOtomatik) {
     hedefCrs =
       otomatikDilim?.kod ??
       (itrf96Mi(kaynakCrs) ? kaynakCrs : itrf96Mi(secilenHedefCrs) ? secilenHedefCrs : 'EPSG:5255');
   }
-  const hedefCrsNotu = hedefCrsNotuOlustur({ hedefCrsKilitli, tkgmModu, tkgmOtomatik, otomatikDilim, hedefCrs });
+  const hedefCrsNotu = hedefCrsNotuOlustur({ formatCrs, tkgmModu, tkgmOtomatik, otomatikDilim, hedefCrs });
 
   const hedefCrsSecildi = (crs) => {
     setSecilenHedefCrs(crs);

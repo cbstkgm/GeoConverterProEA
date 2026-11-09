@@ -33,6 +33,42 @@ export const DESTEKLENEN_CIKTILAR = [
   { uzanti: '.xyz', aciklama: 'XYZ nokta bulutu (köşe noktaları)', mime: 'text/plain' },
   { uzanti: '.html', aciklama: 'HTML harita (Leaflet, tek dosya)', mime: 'text/html' },
   { uzanti: '.md', aciklama: 'Markdown öznitelik tablosu', mime: 'text/markdown' },
+  { uzanti: '.txt', aciklama: 'Metin – satır başına bir WKT', mime: 'text/plain' },
+  { uzanti: '.json', aciklama: 'JSON (GeoJSON içerikli)', mime: 'application/json' },
+  // İkinci dalga — CAD
+  { uzanti: '.step', aciklama: 'STEP AP214 (tel kafes / üçgen yüzey)', mime: 'model/step' },
+  { uzanti: '.stp', aciklama: 'STEP AP214 (tel kafes / üçgen yüzey)', mime: 'model/step' },
+  { uzanti: '.iges', aciklama: 'IGES 5.3 (tel kafes)', mime: 'model/iges' },
+  { uzanti: '.igs', aciklama: 'IGES 5.3 (tel kafes)', mime: 'model/iges' },
+  { uzanti: '.ifc', aciklama: 'IFC4 (georeferanslı, IfcGeographicElement)', mime: 'application/x-step' },
+  { uzanti: '.dgn', aciklama: 'MicroStation V7 DGN', mime: 'application/octet-stream' },
+  // Nokta bulutu ve bilimsel
+  { uzanti: '.las', aciklama: 'LAS 1.2 nokta bulutu (köşe noktaları)', mime: 'application/vnd.las' },
+  { uzanti: '.pcd', aciklama: 'PCD v0.7 nokta bulutu (Point Cloud Library)', mime: 'application/octet-stream' },
+  { uzanti: '.pts', aciklama: 'Leica PTS nokta bulutu', mime: 'text/plain' },
+  { uzanti: '.ptx', aciklama: 'Leica PTX tarama (tek tarama yaklaşımı)', mime: 'text/plain' },
+  { uzanti: '.e57', aciklama: 'ASTM E57 3B tarama verisi', mime: 'application/octet-stream' },
+  { uzanti: '.nc', aciklama: 'NetCDF klasik (CF-1.8 geometri)', mime: 'application/x-netcdf' },
+  // CBS / veritabanı
+  { uzanti: '.sqlite', aciklama: 'SpatiaLite 4.x (SQLite)', mime: 'application/vnd.sqlite3' },
+  { uzanti: '.mvt', aciklama: 'Mapbox Vector Tile 2.1 (tek döşeme, Web Mercator)', mime: 'application/vnd.mapbox-vector-tile' },
+  { uzanti: '.pbf', aciklama: 'Vector Tile .pbf (tek döşeme, Web Mercator)', mime: 'application/vnd.mapbox-vector-tile' },
+  { uzanti: '.xml', aciklama: 'LandXML 1.2', mime: 'application/xml' },
+  { uzanti: '.e00', aciklama: 'ArcInfo Export (E00, Windows-1254)', mime: 'application/octet-stream' },
+  // 3B ağ ve sahne
+  { uzanti: '.obj', aciklama: 'Wavefront OBJ (3B ağ)', mime: 'model/obj' },
+  { uzanti: '.stl', aciklama: 'STL (ikili; üçgen yüzeyler)', mime: 'model/stl' },
+  { uzanti: '.ply', aciklama: 'PLY (Stanford; ikili)', mime: 'application/x-ply' },
+  { uzanti: '.gltf', aciklama: 'glTF 2.0 (JSON, gömülü buffer)', mime: 'model/gltf+json' },
+  { uzanti: '.glb', aciklama: 'glTF 2.0 ikili (GLB)', mime: 'model/gltf-binary' },
+  { uzanti: '.3ds', aciklama: 'Autodesk 3D Studio (3DS)', mime: 'application/x-3ds' },
+  { uzanti: '.dae', aciklama: 'COLLADA 1.4.1 (3B sahne)', mime: 'model/vnd.collada+xml' },
+  { uzanti: '.x3d', aciklama: 'X3D 4.0 XML (3B sahne)', mime: 'model/x3d+xml' },
+  { uzanti: '.wrl', aciklama: 'VRML97 (3B sahne)', mime: 'model/vrml' },
+  { uzanti: '.usd', aciklama: 'USD (USDA metin, Z-yukarı)', mime: 'model/vnd.usda' },
+  { uzanti: '.usdz', aciklama: 'USDZ paketi', mime: 'model/vnd.usdz+zip' },
+  { uzanti: '.ma', aciklama: 'Maya ASCII sahnesi', mime: 'text/plain' },
+  { uzanti: '.3dm', aciklama: 'Rhino 3DM (openNURBS)', mime: 'application/octet-stream' },
 ];
 
 /** KML 2.2 standardı koordinatları yalnızca WGS84 boylam/enlem olarak tanımlar. */
@@ -40,6 +76,21 @@ export const WGS84_ZORUNLU_CIKTILAR = new Set(['.kml', '.kmz']);
 
 export const wgs84ZorunluMu = (uzanti) =>
   typeof uzanti === 'string' && WGS84_ZORUNLU_CIKTILAR.has(uzanti.trim().toLowerCase());
+
+/**
+ * Hedef koordinat sistemi formatın kendisi tarafından belirlenen çıktılar.
+ * KML/KMZ: standart yalnızca WGS84 tanımlar. MVT: döşeme ızgarası Web Mercator'dur.
+ */
+const ZORUNLU_CRS = Object.freeze({
+  '.kml': { kod: 'EPSG:4326', not: 'KML/KMZ standardı yalnızca WGS84 (EPSG:4326) koordinatlarını kabul eder.' },
+  '.kmz': { kod: 'EPSG:4326', not: 'KML/KMZ standardı yalnızca WGS84 (EPSG:4326) koordinatlarını kabul eder.' },
+  '.mvt': { kod: 'EPSG:3857', not: 'Vector Tile döşemeleri Web Mercator (EPSG:3857) ızgarasında üretilir.' },
+  '.pbf': { kod: 'EPSG:3857', not: 'Vector Tile döşemeleri Web Mercator (EPSG:3857) ızgarasında üretilir.' },
+});
+
+/** @returns {{ kod: string, not: string } | null} */
+export const zorunluCrs = (uzanti) =>
+  typeof uzanti === 'string' ? ZORUNLU_CRS[uzanti.trim().toLowerCase()] ?? null : null;
 
 /**
  * ED50 → WGS84 Türkiye parametreleri.

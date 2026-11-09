@@ -45,8 +45,47 @@ GeoConverterProEA, CBS (Coğrafi Bilgi Sistemi) verilerini **tamamen tarayıcıd
 | `.xyz` | XYZ nokta bulutu (tüm köşe noktaları) |
 | `.html` | Tek dosyalık Leaflet harita sayfası (CARTO / Esri uydu / OSM altlıkları) |
 | `.md` | Markdown öznitelik tablosu (GFM) |
+| `.txt`, `.json` | WKT ve GeoJSON içerikli eşdeğer uzantılar |
 
-Format kataloğunda "planlanan" olarak işaretli diğer formatlar (ör. DWG, NCZ, IFC) henüz tarayıcıda desteklenmez.
+**CAD ve BIM**
+
+| Uzantı | Açıklama |
+|---|---|
+| `.step`, `.stp` | STEP AP214 (tel kafes; isteğe bağlı üçgen yüzeyler) |
+| `.iges`, `.igs` | IGES 5.3 (tel kafes) |
+| `.ifc` | IFC4 (`IfcGeographicElement`, `IfcMapConversion` ile georeferanslı) |
+| `.dgn` | MicroStation V7 DGN |
+
+**Nokta bulutu ve bilimsel**
+
+| Uzantı | Açıklama |
+|---|---|
+| `.las` | LAS 1.2 (GeoKey VLR ile CRS) |
+| `.pcd`, `.pts`, `.ptx` | Point Cloud Library PCD v0.7, Leica PTS / PTX |
+| `.e57` | ASTM E57 |
+| `.nc` | NetCDF klasik, CF-1.8 geometri konvansiyonu |
+
+**CBS ve veritabanı**
+
+| Uzantı | Açıklama |
+|---|---|
+| `.sqlite` | SpatiaLite 4.x |
+| `.mvt`, `.pbf` | Mapbox Vector Tile 2.1 (tek döşeme; hedef CRS otomatik Web Mercator) |
+| `.xml` | LandXML 1.2 (parseller, CgPoints) |
+| `.e00` | ArcInfo Export (E00) |
+
+**3B ağ ve sahne** (poligonlar üçgenlenir; büyük koordinatlar merkeze ötelenir, öteleme dosyada saklanır)
+
+| Uzantı | Açıklama |
+|---|---|
+| `.obj`, `.stl`, `.ply`, `.3ds` | Wavefront OBJ, STL, Stanford PLY, 3D Studio |
+| `.gltf`, `.glb` | glTF 2.0 |
+| `.dae`, `.x3d`, `.wrl` | COLLADA 1.4.1, X3D 4.0, VRML97 |
+| `.usd`, `.usdz` | Universal Scene Description (USDA) |
+| `.ma` | Maya ASCII |
+| `.3dm` | Rhino 3DM (rhino3dm) |
+
+Katalogdaki şu formatlar tarayıcıda yazılamaz ve "yakında" olarak kalır: kapalı/belgelenmemiş biçimler (DWG, Netcad NCZ, ACIS SAT, Parasolid, FBX, Blender, Cinema 4D, Maya Binary, FME FFS) ve ağır/karmaşık olanlar (Alembic, Esri File Geodatabase, MapInfo TAB/MAP, LAZ, HDF5). PostGIS veritabanına aktarım için `.sql` çıktısı kullanılabilir.
 
 ### Koordinat sistemleri
 

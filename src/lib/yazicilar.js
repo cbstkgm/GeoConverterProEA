@@ -13,6 +13,32 @@ import { sqlYaz } from './bicimler/sql.js';
 import { xyzYaz } from './bicimler/xyz.js';
 import { htmlYaz } from './bicimler/html.js';
 import { markdownYaz } from './bicimler/markdown.js';
+// İkinci dalga
+import { stepYaz } from './bicimler/step.js';
+import { igesYaz } from './bicimler/iges.js';
+import { ifcYaz } from './bicimler/ifc.js';
+import { dgnYaz } from './bicimler/dgn.js';
+import { lasYaz } from './bicimler/las.js';
+import { pcdYaz } from './bicimler/pcd.js';
+import { ptsYaz } from './bicimler/pts.js';
+import { ptxYaz } from './bicimler/ptx.js';
+import { e57Yaz } from './bicimler/e57.js';
+import { netcdfYaz } from './bicimler/netcdf.js';
+import { spatialiteYaz } from './bicimler/spatialite.js';
+import { mvtYaz } from './bicimler/mvt.js';
+import { landxmlYaz } from './bicimler/landxml.js';
+import { e00Yaz } from './bicimler/e00.js';
+import { objYaz } from './bicimler/obj.js';
+import { stlYaz } from './bicimler/stl.js';
+import { plyYaz } from './bicimler/ply.js';
+import { gltfYaz, glbYaz } from './bicimler/gltf.js';
+import { ucDsYaz } from './bicimler/uc_ds.js';
+import { colladaYaz } from './bicimler/collada.js';
+import { x3dYaz } from './bicimler/x3d.js';
+import { vrmlYaz } from './bicimler/vrml.js';
+import { usdYaz, usdzYaz } from './bicimler/usd.js';
+import { mayaYaz } from './bicimler/maya.js';
+import { rhinoYaz } from './bicimler/rhino.js';
 
 export { DESTEKLENEN_CIKTILAR };
 
@@ -211,6 +237,43 @@ const YAZICILAR = {
   '.xyz': xyzYaz,
   '.html': htmlYaz,
   '.md': markdownYaz,
+  // Uzantı eşdeğerleri: içerik mevcut yazıcılarla aynıdır.
+  '.txt': wktYaz,
+  '.json': geojsonYaz,
+  // İkinci dalga — CAD
+  '.step': stepYaz,
+  '.stp': stepYaz,
+  '.iges': igesYaz,
+  '.igs': igesYaz,
+  '.ifc': ifcYaz,
+  '.dgn': dgnYaz,
+  // Nokta bulutu ve bilimsel
+  '.las': lasYaz,
+  '.pcd': pcdYaz,
+  '.pts': ptsYaz,
+  '.ptx': ptxYaz,
+  '.e57': e57Yaz,
+  '.nc': netcdfYaz,
+  // CBS / veritabanı
+  '.sqlite': spatialiteYaz,
+  '.mvt': mvtYaz,
+  '.pbf': mvtYaz,
+  '.xml': landxmlYaz,
+  '.e00': e00Yaz,
+  // 3B ağ ve sahne
+  '.obj': objYaz,
+  '.stl': stlYaz,
+  '.ply': plyYaz,
+  '.gltf': gltfYaz,
+  '.glb': glbYaz,
+  '.3ds': ucDsYaz,
+  '.dae': colladaYaz,
+  '.x3d': x3dYaz,
+  '.wrl': vrmlYaz,
+  '.usd': usdYaz,
+  '.usdz': usdzYaz,
+  '.ma': mayaYaz,
+  '.3dm': rhinoYaz,
 };
 
 export async function dosyaYaz(fc, uzanti, secenekler = {}) {
