@@ -49,13 +49,14 @@ body {
 
 .grid-kapsayici {
   display: grid;
-  grid-template-columns: 2fr 1.2fr 2fr;
+  /* minmax(0, …): uzun seçenek metinli select'ler sütunu içeriğe göre genişletip taşırmasın */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 2fr);
   gap: 24px;
 }
 
 @media (max-width: 1100px) {
   .grid-kapsayici {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -128,6 +129,9 @@ select, .fluent-input {
   transition: all var(--gecis-suresi) ease;
   outline: none;
   cursor: pointer;
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 select:hover, .fluent-input:hover {
@@ -252,6 +256,14 @@ select option {
   transition: width 0.4s ease;
 }
 
+.alan-notu {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #a0a0a0;
+}
+
 .sonuc-bilgi {
   margin-top: 12px;
   text-align: center;
@@ -262,6 +274,7 @@ select option {
 
 .harita-alani {
   width: 100%;
+  margin-top: 0;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--panel-kenarlik);
@@ -293,6 +306,8 @@ select option {
 
 .metin-kutusu-baslik {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
   padding: 10px 14px;
@@ -359,4 +374,49 @@ select option {
 }
 .leaflet-control-attribution a {
   color: #4cc2ff !important;
+}
+
+.leaflet-popup-content {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+@media (max-width: 768px) {
+  body {
+    padding: 10px;
+  }
+
+  .uygulama-kapsayici {
+    width: 100%;
+    gap: 14px;
+    margin-top: 0;
+  }
+
+  .grid-kapsayici {
+    gap: 14px;
+  }
+
+  .fluent-panel {
+    padding: 16px;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+  }
+
+  .aciklama {
+    font-size: 0.9rem;
+  }
+
+  select, .fluent-input {
+    padding: 12px 14px;
+  }
+
+  .fluent-buton {
+    padding: 14px 18px;
+    font-size: 1rem;
+  }
+
+  .dosya-yukleme-alani.surukleniyor {
+    transform: none;
+  }
 }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Çankaya Köşkü</name>
+      <description>Şehir merkezi, ığdır üğö</description>
+      <Point><coordinates>32.8597,39.8885,0</coordinates></Point>
+    </Placemark>
+    <Placemark>
+      <name>Yol</name>
+      <LineString><coordinates>32.80,39.90 32.85,39.92 32.90,39.95</coordinates></LineString>
+    </Placemark>
+  </Document>
+</kml>

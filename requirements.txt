@@ -1,0 +1,14 @@
+# GeoConverterPro - Python arka uç (cografi_donusturucu.py)
+geopandas>=1.0,<2.0
+pyogrio>=0.7,<1.0          # GeoPandas 1.x varsayılan G/Ç motoru (GDAL dahil tekerlek)
+shapely>=2.0,<3.0
+pandas>=2.0,<4.0
+numpy>=1.24,<3.0
+pyproj>=3.6,<4.0
+lxml>=4.9,<7.0
+# fiona isteğe bağlıdır (kuruluysa KML/LIBKML sürücüleri etkinleştirilir); tekerleği olmayan
+# Python sürümlerinde kaynak derlemesi GDAL gerektirdiği için zorunlu bağımlılık değildir:
+# fiona>=1.9,<2.0
+
+# Test
+pytest>=7.0,<10.0

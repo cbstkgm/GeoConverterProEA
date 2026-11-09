@@ -1,77 +1,380 @@
-import os
-import zipfile
+"""GeoConverterPro - GeoPandas tabanlı coğrafi veri dönüştürücü.
+
+Kütüphane olarak kullanım:
+    from cografi_donusturucu import DonusturucuYoneticisi
+    DonusturucuYoneticisi().format_algila_ve_donustur("girdi.csv", "cikti.gpkg",
+                                                       kaynak_crs="EPSG:4326",
+                                                       hedef_crs="EPSG:5254")
+
+Komut satırı:
+    python cografi_donusturucu.py girdi.csv cikti.gpkg --kaynak-crs EPSG:4326 \
+        --hedef-crs EPSG:5254 --kolonlar a,b --geometri-kolonu wkt
+"""
+import argparse
 import logging
+import os
+import re
+import sys
+import tempfile
+import unicodedata
+import zipfile
+
 import geopandas as gpd
+import numpy as np
 import pandas as pd
-from shapely import wkt
-from shapely.geometry import Point
+import shapely
 from lxml import etree
-import fiona
+from shapely import wkt
 
-# KML/KMZ Sürücü Desteğini Aktif Etme
-fiona.drvsupport.supported_drivers['KML'] = 'rw'
-fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
+# Fiona isteğe bağlıdır (GeoPandas 1.x varsayılan olarak pyogrio kullanır).
+# Kuruluysa KML/LIBKML sürücülerini yazma için etkinleştir.
+try:  # pragma: no cover - ortama bağlı
+    import fiona
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    fiona.drvsupport.supported_drivers['KML'] = 'rw'
+    fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'
+except Exception:  # fiona yok ya da sürücü tablosu farklı
+    fiona = None
+
+# Kütüphane olarak import edildiğinde global logging yapılandırılmaz; yalnız logger alınır.
+logger = logging.getLogger(__name__)
+
+VARSAYILAN_CRS = "EPSG:4326"
+KML_CRS = "EPSG:4326"
+
+
+# ---------------------------------------------------------------------------
+# Yardımcı fonksiyonlar
+# ---------------------------------------------------------------------------
+
+_TR_ASCII = str.maketrans("çğıöşüÇĞİÖŞÜâîûÂÎÛ", "cgiosuCGIOSUaiuAIU")
+
+
+def kolon_adi_normalize(ad) -> str:
+    """Sütun adını karşılaştırma için normalize eder: küçük harf, Türkçe karakter -> ASCII,
+    harf/rakam dışı karakterler (boşluk, _, -, . vb.) silinir. Örn: 'X_Koord' -> 'xkoord'."""
+    metin = str(ad).strip().translate(_TR_ASCII).lower()
+    metin = unicodedata.normalize("NFKD", metin)
+    metin = "".join(c for c in metin if not unicodedata.combining(c))
+    return re.sub(r"[^0-9a-z]", "", metin)
+
+
+# Öncelik sırasına göre aday adlar (normalize edilmiş halleriyle, TAM eşleşme aranır).
+WKT_KOLON_ADLARI = [
+    "wkt", "geometrywkt", "wktgeometry", "geomwkt", "wktgeom", "thegeom",
+    "geometry", "geometri", "geom", "shape", "wktdata", "geometriwkt", "wktgeometri",
+]
+X_KOLON_ADLARI = [
+    "x", "lon", "lng", "long", "longitude", "boylam", "easting", "east", "dogu",
+    "xkoord", "xkoordinat", "koordinatx", "koordx", "xcoord", "xcoordinate", "coordx", "pointx", "saga",
+]
+Y_KOLON_ADLARI = [
+    "y", "lat", "latitude", "enlem", "northing", "north", "kuzey",
+    "ykoord", "ykoordinat", "koordinaty", "koordy", "ycoord", "ycoordinate", "coordy", "pointy", "yukari",
+]
+
+
+def kolon_bul(kolonlar, adaylar, haric=()):
+    """`adaylar` listesindeki öncelik sırasıyla, normalize adı TAM eşleşen ilk sütunu döndürür."""
+    normalize = {}
+    for kolon in kolonlar:
+        if kolon in haric:
+            continue
+        normalize.setdefault(kolon_adi_normalize(kolon), kolon)
+    for aday in adaylar:
+        if aday in normalize:
+            return normalize[aday]
+    return None
+
+
+def guvenli_wkt(deger):
+    """Tek bir değeri WKT olarak çözer; çözülemezse None döner."""
+    if deger is None or (isinstance(deger, float) and np.isnan(deger)):
+        return None
+    metin = str(deger).strip()
+    if not metin:
+        return None
+    try:
+        return wkt.loads(metin)
+    except Exception:
+        return None
+
+
+def sayiya_cevir(seri: pd.Series) -> pd.Series:
+    """Sayısal olmayan değerleri NaN yapar; ondalık virgülü ('41,02') noktaya çevirir."""
+    if pd.api.types.is_numeric_dtype(seri):
+        return pd.to_numeric(seri, errors="coerce")
+    metin = seri.astype(str).str.strip().str.replace(",", ".", regex=False)
+    return pd.to_numeric(metin, errors="coerce")
+
+
+def katman_adlari(dosya_yolu: str):
+    """Dosyadaki katman adlarını döndürür (GeoPandas >=1.0 list_layers, yoksa fiona)."""
+    if hasattr(gpd, "list_layers"):
+        return list(gpd.list_layers(dosya_yolu)["name"])
+    if fiona is not None:  # pragma: no cover - eski sürümler
+        return list(fiona.listlayers(dosya_yolu))
+    return [None]  # pragma: no cover
+
+
+def tum_katmanlari_oku(dosya_yolu: str, katmanlar=None, katman_kolonu=None) -> gpd.GeoDataFrame:
+    """Birden fazla katmanlı dosyalarda (KML klasörleri, GPX) boş olmayan tüm katmanları birleştirir."""
+    if katmanlar is None:
+        try:
+            katmanlar = katman_adlari(dosya_yolu)
+        except Exception as e:
+            logger.debug(f"Katmanlar listelenemedi ({e}); tek katman okunuyor.")
+            return gpd.read_file(dosya_yolu)
+
+    parcalar = []
+    for katman in katmanlar:
+        try:
+            parca = gpd.read_file(dosya_yolu, layer=katman) if katman is not None else gpd.read_file(dosya_yolu)
+        except Exception as e:
+            logger.warning(f"'{katman}' katmanı okunamadı, atlanıyor: {e}")
+            continue
+        if parca.empty:
+            continue
+        if katman_kolonu:
+            parca[katman_kolonu] = katman
+        parcalar.append(parca)
+
+    if not parcalar:
+        raise ValueError(f"Dosyada okunabilir (boş olmayan) katman bulunamadı: {dosya_yolu}")
+    if len(parcalar) == 1:
+        return parcalar[0]
+    crs = next((p.crs for p in parcalar if p.crs is not None), None)
+    parcalar = [p.to_crs(crs) if (crs is not None and p.crs is not None and p.crs != crs) else p for p in parcalar]
+    birlesik = pd.concat(parcalar, ignore_index=True)
+    return gpd.GeoDataFrame(birlesik, geometry="geometry", crs=crs)
+
+
+def crs_ata(gdf: gpd.GeoDataFrame, kaynak_crs=None) -> gpd.GeoDataFrame:
+    """CRS'siz veriye kaynak CRS (yoksa EPSG:4326) atar. Kullanıcı açıkça bir kaynak CRS verdiyse
+    ve dosyanın CRS'si farklıysa, kullanıcının değeri esas alınır (yeniden projeksiyon YAPILMAZ)."""
+    if gdf.crs is None:
+        crs = kaynak_crs or VARSAYILAN_CRS
+        if kaynak_crs is None:
+            logger.info(f"Girdide CRS bilgisi yok; varsayılan {VARSAYILAN_CRS} atanıyor.")
+        return gdf.set_crs(crs)
+    if kaynak_crs is not None:
+        hedef = gpd.GeoSeries([], crs=kaynak_crs).crs
+        if gdf.crs != hedef:
+            logger.warning(f"Dosyanın CRS'si ({gdf.crs.to_string()}) kullanıcı kaynak CRS'si ({kaynak_crs}) ile "
+                           f"değiştiriliyor (koordinatlar dönüştürülmez).")
+            return gdf.set_crs(kaynak_crs, allow_override=True)
+    return gdf
+
+
+def gecerli_xml_adi(ad, kullanilanlar=None) -> str:
+    """Sütun adını geçerli bir XML element adına (NCName) çevirir.
+    Unicode harfler (Türkçe dahil), rakam, '_', '-', '.' korunur; diğerleri '_' olur.
+    Harf/'_' ile başlamayan veya 'xml' ile başlayan adların başına '_' eklenir."""
+    metin = unicodedata.normalize("NFC", str(ad).strip())
+    temiz = "".join(c if (c.isalnum() or c in "_-.") else "_" for c in metin)
+    temiz = re.sub(r"_+", "_", temiz)
+    if not temiz:
+        temiz = "alan"
+    if not (temiz[0].isalpha() or temiz[0] == "_") or temiz.lower().startswith("xml"):
+        temiz = "_" + temiz
+    if kullanilanlar is not None:
+        aday, sayac = temiz, 2
+        while aday in kullanilanlar:
+            aday = f"{temiz}_{sayac}"
+            sayac += 1
+        temiz = aday
+        kullanilanlar.add(temiz)
+    return temiz
+
+
+def bos_mu(deger) -> bool:
+    """None / NaN / NaT / pd.NA için True döndürür (liste vb. için False)."""
+    if deger is None:
+        return True
+    try:
+        sonuc = pd.isna(deger)
+    except Exception:
+        return False
+    return bool(sonuc) if np.ndim(sonuc) == 0 else False
+
+
+# ---------------------------------------------------------------------------
+# Okuyucular
+# ---------------------------------------------------------------------------
 
 class VeriOkuyucuBase:
     """Veri okumak için temel arayüz (Interface)."""
-    def oku(self, dosya_yolu: str) -> gpd.GeoDataFrame:
+    def oku(self, dosya_yolu: str, geometri_kolonu=None) -> gpd.GeoDataFrame:
         raise NotImplementedError("Bu metot alt sınıflar tarafından ezilmelidir.")
+
 
 class GenelOkuyucu(VeriOkuyucuBase):
     """GeoPandas'ın doğrudan desteklediği (SHP, GPKG, GML, GeoJSON vb.) dosyaları okur."""
-    def oku(self, dosya_yolu: str) -> gpd.GeoDataFrame:
-        logging.info(f"GenelOkuyucu ile okunuyor: {dosya_yolu}")
+    def oku(self, dosya_yolu: str, geometri_kolonu=None) -> gpd.GeoDataFrame:
+        logger.info(f"GenelOkuyucu ile okunuyor: {dosya_yolu}")
         return gpd.read_file(dosya_yolu)
+
+
+class KmlOkuyucu(VeriOkuyucuBase):
+    """KML dosyasını okur; klasör (katman) yapısındaki tüm katmanları birleştirir."""
+    def oku(self, dosya_yolu: str, geometri_kolonu=None) -> gpd.GeoDataFrame:
+        logger.info(f"KmlOkuyucu ile okunuyor: {dosya_yolu}")
+        return tum_katmanlari_oku(dosya_yolu)
+
+
+class KmzOkuyucu(VeriOkuyucuBase):
+    """KMZ (zip içinde KML) dosyasından doc.kml'i (yoksa ilk .kml'i) çıkarıp okur."""
+    def oku(self, dosya_yolu: str, geometri_kolonu=None) -> gpd.GeoDataFrame:
+        logger.info(f"KmzOkuyucu ile okunuyor: {dosya_yolu}")
+        with zipfile.ZipFile(dosya_yolu) as zf:
+            kml_adlari = [ad for ad in zf.namelist() if ad.lower().endswith(".kml")]
+            if not kml_adlari:
+                raise ValueError(f"KMZ arşivinde .kml dosyası bulunamadı: {dosya_yolu}")
+            secilen = next((ad for ad in kml_adlari if os.path.basename(ad).lower() == "doc.kml"), kml_adlari[0])
+            with tempfile.TemporaryDirectory(prefix="geoconv_kmz_") as gecici_klasor:
+                gecici_kml = os.path.join(gecici_klasor, "doc.kml")
+                with zf.open(secilen) as kaynak, open(gecici_kml, "wb") as hedef:
+                    hedef.write(kaynak.read())
+                gdf = tum_katmanlari_oku(gecici_kml)
+                # Dosya kilidi kalmasın diye belleğe tamamen alınmış kopya döndür.
+                return gdf.copy()
+
+
+class ZipShapefileOkuyucu(VeriOkuyucuBase):
+    """Zip içindeki Shapefile(lar)ı okur. Birden fazla .shp varsa hepsi birleştirilir."""
+    def oku(self, dosya_yolu: str, geometri_kolonu=None) -> gpd.GeoDataFrame:
+        logger.info(f"ZipShapefileOkuyucu ile okunuyor: {dosya_yolu}")
+        with zipfile.ZipFile(dosya_yolu) as zf:
+            shp_adlari = [ad for ad in zf.namelist() if ad.lower().endswith(".shp")]
+        if not shp_adlari:
+            raise ValueError(f"Zip arşivinde Shapefile (.shp) bulunamadı: {dosya_yolu}")
+        mutlak = os.path.abspath(dosya_yolu).replace("\\", "/")
+        parcalar = []
+        for ad in shp_adlari:
+            parca = gpd.read_file(f"/vsizip/{mutlak}/{ad}")
+            if len(shp_adlari) > 1:
+                parca["kaynak_katman"] = os.path.splitext(os.path.basename(ad))[0]
+            parcalar.append(parca)
+        if len(parcalar) == 1:
+            return parcalar[0]
+        crs = next((p.crs for p in parcalar if p.crs is not None), None)
+        parcalar = [p.to_crs(crs) if (crs is not None and p.crs is not None and p.crs != crs) else p for p in parcalar]
+        return gpd.GeoDataFrame(pd.concat(parcalar, ignore_index=True), geometry="geometry", crs=crs)
+
+
+class GpxOkuyucu(VeriOkuyucuBase):
+    """GPX dosyasının waypoints / routes / tracks katmanlarını okur ve birleştirir."""
+    KATMANLAR = ["waypoints", "routes", "tracks"]
+
+    def oku(self, dosya_yolu: str, geometri_kolonu=None) -> gpd.GeoDataFrame:
+        logger.info(f"GpxOkuyucu ile okunuyor: {dosya_yolu}")
+        return tum_katmanlari_oku(dosya_yolu, katmanlar=self.KATMANLAR, katman_kolonu="gpx_katman")
+
 
 class CsvOkuyucu(VeriOkuyucuBase):
     """CSV formatındaki verileri okur ve geometriye çevirir."""
-    def oku(self, dosya_yolu: str) -> gpd.GeoDataFrame:
-        logging.info(f"CsvOkuyucu ile okunuyor: {dosya_yolu}")
-        
+
+    @staticmethod
+    def csv_oku(dosya_yolu: str) -> pd.DataFrame:
         try:
             # Önce noktalı virgül ve hatalı satır atlama ile dene (CBS dosyaları için en sağlıklısı)
             df = pd.read_csv(dosya_yolu, sep=';', on_bad_lines='skip', encoding_errors='replace', low_memory=False)
-            if len(df.columns) < 2: # Noktalı virgül değilse virgülle ayırmayı zorla
+            if len(df.columns) < 2:  # Noktalı virgül değilse virgülle ayırmayı zorla
                 df = pd.read_csv(dosya_yolu, sep=',', on_bad_lines='skip', encoding_errors='replace', low_memory=False)
         except Exception:
             df = pd.read_csv(dosya_yolu, sep=',', on_bad_lines='skip', encoding_errors='replace', low_memory=False)
-            
-        # WKT (Well-Known Text) kolonu var mı kontrol et (kısmi eşleşme: the_geom, wkt_data vb.)
-        wkt_kolonlari = [col for col in df.columns if any(k in str(col).lower() for k in ['wkt', 'geom', 'geometri'])]
-        if wkt_kolonlari:
-            kolon = wkt_kolonlari[0]
-            logging.info(f"CSV'de WKT geometrisi bulundu: {kolon}")
-            
-            def guvenli_wkt(deger):
-                try: 
-                    return wkt.loads(str(deger))
-                except: 
-                    return None
-                    
-            df['geometry'] = df[kolon].apply(guvenli_wkt)
-            df = df.dropna(subset=['geometry']) # Parse edilemeyenleri çıkar
-            return gpd.GeoDataFrame(df, geometry='geometry')
+        return df
 
-        # X, Y veya Enlem, Boylam kolonları var mı kontrol et (kısmi eşleşme)
-        x_kolonlari = [col for col in df.columns if any(k in str(col).lower() for k in ['x', 'lon', 'boylam', 'easting'])]
-        y_kolonlari = [col for col in df.columns if any(k in str(col).lower() for k in ['y', 'lat', 'enlem', 'northing'])]
-        
-        if x_kolonlari and y_kolonlari:
-            x_kol = x_kolonlari[0]
-            y_kol = y_kolonlari[0]
-            logging.info(f"CSV'de koordinat kolonları bulundu: X={x_kol}, Y={y_kol}")
-            df['geometry'] = df.apply(lambda row: Point(float(row[x_kol]), float(row[y_kol])), axis=1)
-            return gpd.GeoDataFrame(df, geometry='geometry')
-            
+    @staticmethod
+    def wkt_kolonu_bul(kolonlar):
+        return kolon_bul(kolonlar, WKT_KOLON_ADLARI)
+
+    @staticmethod
+    def koordinat_kolonlari_bul(kolonlar):
+        """(x_kolonu, y_kolonu) döndürür; bulunamayan None olur. Tam/normalize eşleşme kullanılır."""
+        x_kol = kolon_bul(kolonlar, X_KOLON_ADLARI)
+        y_kol = kolon_bul(kolonlar, Y_KOLON_ADLARI, haric=(x_kol,))
+        return x_kol, y_kol
+
+    def oku(self, dosya_yolu: str, geometri_kolonu=None) -> gpd.GeoDataFrame:
+        logger.info(f"CsvOkuyucu ile okunuyor: {dosya_yolu}")
+        df = self.csv_oku(dosya_yolu)
+
+        # WKT (Well-Known Text) kolonu: kullanıcı belirttiyse o, yoksa tam/normalize ad eşleşmesi
+        if geometri_kolonu:
+            if geometri_kolonu not in df.columns:
+                raise ValueError(f"Belirtilen geometri kolonu CSV'de yok: {geometri_kolonu}")
+            kolon = geometri_kolonu
+        else:
+            kolon = self.wkt_kolonu_bul(df.columns)
+
+        if kolon is not None:
+            geometriler = df[kolon].apply(guvenli_wkt)
+            gecerli = geometriler.notna()
+            if gecerli.any():
+                logger.info(f"CSV'de WKT geometrisi bulundu: {kolon}")
+                atlanan = int((~gecerli).sum())
+                if atlanan:
+                    logger.warning(f"{atlanan} satırın WKT değeri çözülemedi, atlandı.")
+                df = df.loc[gecerli].copy()
+                if kolon == "geometry":
+                    df = df.drop(columns=["geometry"])
+                return gpd.GeoDataFrame(df, geometry=gpd.GeoSeries(geometriler[gecerli].values, index=df.index))
+            if geometri_kolonu:
+                raise ValueError(f"'{geometri_kolonu}' kolonunda çözülebilir WKT geometrisi yok.")
+            logger.warning(f"'{kolon}' kolonu WKT olarak çözülemedi; koordinat kolonları aranıyor.")
+
+        # X, Y veya Enlem, Boylam kolonları (tam/normalize eşleşme)
+        x_kol, y_kol = self.koordinat_kolonlari_bul(df.columns)
+        if x_kol is not None and y_kol is not None:
+            logger.info(f"CSV'de koordinat kolonları bulundu: X={x_kol}, Y={y_kol}")
+            x_deger = sayiya_cevir(df[x_kol])
+            y_deger = sayiya_cevir(df[y_kol])
+            gecerli = x_deger.notna() & y_deger.notna()
+            atlanan = int((~gecerli).sum())
+            if atlanan:
+                logger.warning(f"{atlanan} satırda koordinat sayıya çevrilemedi, atlandı.")
+            if not gecerli.any():
+                raise ValueError(f"'{x_kol}'/'{y_kol}' kolonlarında geçerli sayısal koordinat yok.")
+            df = df.loc[gecerli].copy()
+            if "geometry" in df.columns:
+                df = df.drop(columns=["geometry"])
+            return gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(x_deger[gecerli], y_deger[gecerli]))
+
         raise ValueError("CSV dosyasında geometri (WKT) veya koordinat (X, Y) kolonları bulunamadı!")
 
+
+class WktOkuyucu(VeriOkuyucuBase):
+    """WKT formatındaki verileri (satır başına bir geometri) okur."""
+    def oku(self, dosya_yolu: str, geometri_kolonu=None) -> gpd.GeoDataFrame:
+        logger.info(f"WktOkuyucu ile okunuyor: {dosya_yolu}")
+        with open(dosya_yolu, 'r', encoding='utf-8-sig') as f:
+            lines = f.readlines()
+
+        geoms = []
+        for satir_no, line in enumerate(lines, start=1):
+            line = line.strip()
+            if line:
+                try:
+                    geoms.append(wkt.loads(line))
+                except Exception as e:
+                    logger.warning(f"WKT parse hatası, satır {satir_no} atlanıyor: {e}")
+
+        if not geoms:
+            raise ValueError("Dosyada geçerli bir WKT geometrisi bulunamadı.")
+
+        return gpd.GeoDataFrame(geometry=geoms)
+
+
+# ---------------------------------------------------------------------------
+# Yazıcılar
+# ---------------------------------------------------------------------------
 
 class VeriYaziciBase:
     """Veri yazmak için temel arayüz (Interface)."""
     def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str):
         raise NotImplementedError("Bu metot alt sınıflar tarafından ezilmelidir.")
+
 
 class GenelYazici(VeriYaziciBase):
     """GeoPandas'ın doğrudan desteklediği standart formatlarda yazar (SHP, GPKG vb.)."""
@@ -79,29 +382,77 @@ class GenelYazici(VeriYaziciBase):
         self.surucu = surucu
 
     def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str):
-        logging.info(f"Dosya yazılıyor ({self.surucu if self.surucu else 'Otomatik Sürücü'}): {dosya_yolu}")
+        logger.info(f"Dosya yazılıyor ({self.surucu if self.surucu else 'Otomatik Sürücü'}): {dosya_yolu}")
         if self.surucu:
             gdf.to_file(dosya_yolu, driver=self.surucu)
         else:
             gdf.to_file(dosya_yolu)
 
+
+class KmlYazici(VeriYaziciBase):
+    """KML yazar. KML her zaman WGS84 (EPSG:4326) olduğundan gerekirse yeniden projekte eder.
+    Önce LIBKML, kullanılamazsa GDAL'ın KML sürücüsü denenir."""
+    SURUCULER = ("LIBKML", "KML")
+
+    def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str):
+        if gdf.crs is None:
+            logger.warning(f"KML için CRS bilinmiyor; {KML_CRS} varsayılıyor.")
+            gdf = gdf.set_crs(KML_CRS)
+        elif gdf.crs != gpd.GeoSeries([], crs=KML_CRS).crs:
+            logger.info(f"KML için {gdf.crs.to_string()} -> {KML_CRS} dönüşümü yapılıyor.")
+            gdf = gdf.to_crs(KML_CRS)
+
+        son_hata = None
+        for surucu in self.SURUCULER:
+            try:
+                if os.path.exists(dosya_yolu):
+                    os.remove(dosya_yolu)
+                gdf.to_file(dosya_yolu, driver=surucu)
+                logger.info(f"KML yazıldı ({surucu}): {dosya_yolu}")
+                return
+            except Exception as e:
+                logger.debug(f"{surucu} sürücüsü ile KML yazılamadı: {e}")
+                son_hata = e
+        raise RuntimeError(f"KML yazılamadı (denenen sürücüler: {', '.join(self.SURUCULER)}): {son_hata}")
+
+
 class CsvYazici(VeriYaziciBase):
     """Veriyi CSV olarak yazar (Geometriyi WKT olarak ekler)."""
     def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str):
-        logging.info(f"CsvYazici ile yazılıyor: {dosya_yolu}")
-        df = pd.DataFrame(gdf)
-        df['geometry'] = gdf.geometry.apply(lambda x: x.wkt if x else None)
+        logger.info(f"CsvYazici ile yazılıyor: {dosya_yolu}")
+        df = pd.DataFrame(gdf.drop(columns=[gdf.geometry.name]))
+        df['geometry'] = gdf.geometry.to_wkt()
         df.to_csv(dosya_yolu, index=False)
+
+
+class WktYazici(VeriYaziciBase):
+    """Her satıra bir geometri olacak şekilde düz WKT dosyası yazar (öznitelikler yazılmaz)."""
+    def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str):
+        logger.info(f"WktYazici ile yazılıyor: {dosya_yolu}")
+        sayac = 0
+        with open(dosya_yolu, 'w', encoding='utf-8', newline='\n') as f:
+            for geom in gdf.geometry:
+                if geom is None or geom.is_empty:
+                    continue
+                f.write(geom.wkt + "\n")
+                sayac += 1
+        logger.info(f"{sayac} geometri WKT olarak yazıldı.")
+
 
 class NetcadGMLYazici(VeriYaziciBase):
     """Orijinal koda sadık kalarak, poligonları NetCAD/TKGM GML formatında yazar."""
+    TKGM_NS = "http://www.tkgm.gov.tr"
+    GML_NS = "http://www.opengis.net/gml"
+    SABIT_ALANLAR = {'geometry', 'ad', 'id', 'group_id', 'ilcead', 'geom'}
+
     def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str):
-        logging.info(f"NetcadGMLYazici ile işleniyor ve yazılıyor: {dosya_yolu}")
-        
+        logger.info(f"NetcadGMLYazici ile işleniyor ve yazılıyor: {dosya_yolu}")
+        TKGM, GML = self.TKGM_NS, self.GML_NS
+
         # Sadece poligon ve multipoligon alınıyor
-        gdf = gdf[gdf.geometry.type.isin(['Polygon', 'MultiPolygon'])]
+        gdf = gdf[gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon'])]
         if gdf.empty:
-            logging.warning("Dosyada işlenecek Polygon veya MultiPolygon bulunamadı.")
+            logger.warning("Dosyada işlenecek Polygon veya MultiPolygon bulunamadı.")
             return
 
         gdf = gdf.explode(index_parts=False)
@@ -116,44 +467,52 @@ class NetcadGMLYazici(VeriYaziciBase):
                         return None
                     return onarilmis
                 except Exception as e:
-                    logging.error(f"Geometri onarımı sırasında hata: {e}")
+                    logger.error(f"Geometri onarımı sırasında hata: {e}")
                     return None
             return geom
 
-        gdf['geometry'] = gdf['geometry'].apply(geometri_temizle)
-        gdf.dropna(subset=['geometry'], inplace=True)
+        gdf = gdf.copy()
+        gdf['geometry'] = gdf.geometry.apply(geometri_temizle)
+        gdf = gdf.dropna(subset=['geometry'])
 
         if 'id' not in gdf.columns:
-            logging.warning("'id' kolonu bulunamadı. Yeni bir group_id oluşturuluyor.")
+            logger.warning("'id' kolonu bulunamadı. Yeni bir group_id oluşturuluyor.")
             gdf['group_id'] = range(len(gdf))
             grup_kolonu = 'group_id'
         else:
             grup_kolonu = 'id'
 
+        # geopandas 1.x: unary_union kaldırıldı/deprecated -> shapely.union_all
         toplanmis_gdf = gdf.groupby(grup_kolonu).agg({
-            'geometry': lambda geoms: geoms.unary_union,
+            'geometry': lambda geoms: shapely.union_all(np.asarray(list(geoms), dtype=object)),
             **{col: 'first' for col in gdf.columns if col not in ['geometry', grup_kolonu]}
         })
-        toplanmis_gdf = gpd.GeoDataFrame(toplanmis_gdf, geometry='geometry')
+        toplanmis_gdf = gpd.GeoDataFrame(toplanmis_gdf, geometry='geometry', crs=gdf.crs)
 
-        isim_alani = {
-            'TKGM': "http://www.tkgm.gov.tr",
-            'gml': "http://www.opengis.net/gml"
-        }
-        kok_eleman = etree.Element("{http://www.tkgm.gov.tr}FeatureCollection", nsmap=isim_alani)
+        kok_eleman = etree.Element(f"{{{TKGM}}}FeatureCollection", nsmap={'TKGM': TKGM, 'gml': GML})
+
+        # Sütun adı -> geçerli XML element adı eşlemesi (bir kez hesaplanır, çakışmalar önlenir)
+        kullanilan_adlar = set(self.SABIT_ALANLAR)
+        xml_adlari = {}
+        for kolon in toplanmis_gdf.columns:
+            if str(kolon).lower() in self.SABIT_ALANLAR:
+                continue
+            xml_adlari[kolon] = gecerli_xml_adi(kolon, kullanilan_adlar)
+            if xml_adlari[kolon] != str(kolon):
+                logger.info(f"GML alan adı düzeltildi: '{kolon}' -> '{xml_adlari[kolon]}'")
 
         def delikli_poligon_ekle(poligon, ebeveyn_eleman):
-            gml_poligon = etree.SubElement(ebeveyn_eleman, "{http://www.opengis.net/gml}Polygon")
-            
-            dis_sinir = etree.SubElement(gml_poligon, "{http://www.opengis.net/gml}outerBoundaryIs")
-            dis_cizgi = etree.SubElement(dis_sinir, "{http://www.opengis.net/gml}LinearRing")
-            koordinatlar_dis = etree.SubElement(dis_cizgi, "{http://www.opengis.net/gml}coordinates")
+            gml_poligon = etree.SubElement(ebeveyn_eleman, f"{{{GML}}}Polygon")
+
+            dis_sinir = etree.SubElement(gml_poligon, f"{{{GML}}}outerBoundaryIs")
+            dis_cizgi = etree.SubElement(dis_sinir, f"{{{GML}}}LinearRing")
+            koordinatlar_dis = etree.SubElement(dis_cizgi, f"{{{GML}}}coordinates")
             koordinatlar_dis.text = " ".join([f"{x},{y}" for x, y, *_ in poligon.exterior.coords])
-            
+
             for ic_sinir in poligon.interiors:
-                ic_alan = etree.SubElement(gml_poligon, "{http://www.opengis.net/gml}innerBoundaryIs")
-                ic_cizgi = etree.SubElement(ic_alan, "{http://www.opengis.net/gml}LinearRing")
-                koordinatlar_ic = etree.SubElement(ic_cizgi, "{http://www.opengis.net/gml}coordinates")
+                ic_alan = etree.SubElement(gml_poligon, f"{{{GML}}}innerBoundaryIs")
+                ic_cizgi = etree.SubElement(ic_alan, f"{{{GML}}}LinearRing")
+                koordinatlar_ic = etree.SubElement(ic_cizgi, f"{{{GML}}}coordinates")
                 koordinatlar_ic.text = " ".join([f"{x},{y}" for x, y, *_ in ic_sinir.coords])
 
         for id_degeri, satir in toplanmis_gdf.iterrows():
@@ -162,113 +521,105 @@ class NetcadGMLYazici(VeriYaziciBase):
                 if geom is None or geom.is_empty:
                     continue
 
-                ozellik_elemani = etree.SubElement(kok_eleman, "{http://www.tkgm.gov.tr}FeatureMember")
-                ozel_alan = etree.SubElement(ozellik_elemani, "{http://www.tkgm.gov.tr}OzelAlanZemin")
-                etree.SubElement(ozel_alan, "{http://www.tkgm.gov.tr}id").text = str(id_degeri)
-                etree.SubElement(ozel_alan, "{http://www.tkgm.gov.tr}ad").text = str(satir.get("ilcead", id_degeri))
+                ozellik_elemani = etree.SubElement(kok_eleman, f"{{{TKGM}}}FeatureMember")
+                ozel_alan = etree.SubElement(ozellik_elemani, f"{{{TKGM}}}OzelAlanZemin")
+                etree.SubElement(ozel_alan, f"{{{TKGM}}}id").text = str(id_degeri)
+                ad = satir.get("ilcead", id_degeri)
+                etree.SubElement(ozel_alan, f"{{{TKGM}}}ad").text = str(id_degeri if bos_mu(ad) else ad)
 
-                for kolon in satir.index:
-                    if str(kolon).lower() in ['geometry', 'ad', 'id', 'group_id', 'ilcead']:
+                for kolon, xml_adi in xml_adlari.items():
+                    deger = satir[kolon]
+                    if bos_mu(deger):  # None / NaN değerler "nan" olarak yazılmaz, atlanır
                         continue
-                    if satir[kolon] is not None:
-                        etree.SubElement(ozel_alan, f"{{http://www.tkgm.gov.tr}}{kolon}").text = str(satir[kolon])
+                    etree.SubElement(ozel_alan, f"{{{TKGM}}}{xml_adi}").text = str(deger)
 
-                geom_eleman = etree.SubElement(ozel_alan, "{http://www.tkgm.gov.tr}geom")
+                geom_eleman = etree.SubElement(ozel_alan, f"{{{TKGM}}}geom")
 
                 if geom.geom_type == 'Polygon':
                     delikli_poligon_ekle(geom, geom_eleman)
                 elif geom.geom_type == 'MultiPolygon':
-                    gml_multi_poligon = etree.SubElement(geom_eleman, "{http://www.opengis.net/gml}MultiPolygon")
+                    gml_multi_poligon = etree.SubElement(geom_eleman, f"{{{GML}}}MultiPolygon")
                     for alt_poligon in geom.geoms:
-                        poligon_uyesi = etree.SubElement(gml_multi_poligon, "{http://www.opengis.net/gml}polygonMember")
+                        poligon_uyesi = etree.SubElement(gml_multi_poligon, f"{{{GML}}}polygonMember")
                         delikli_poligon_ekle(alt_poligon, poligon_uyesi)
 
             except Exception as e:
-                logging.error(f"'{id_degeri}' id'li nesne islenirken hata: {e}")
+                logger.error(f"'{id_degeri}' id'li nesne islenirken hata: {e}")
 
         agac = etree.ElementTree(kok_eleman)
         agac.write(dosya_yolu, pretty_print=True, xml_declaration=True, encoding="UTF-8")
-        logging.info(f"Netcad (TKGM) GML dönüşümü tamamlandı: {dosya_yolu}")
+        logger.info(f"Netcad (TKGM) GML dönüşümü tamamlandı: {dosya_yolu}")
+
 
 class KmzYazici(VeriYaziciBase):
     """KML oluşturup onu zipleyerek KMZ formatına çeviren yazıcı sınıfı."""
+    def __init__(self, kml_yazici=None):
+        self.kml_yazici = kml_yazici or KmlYazici()
+
     def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str):
-        # Geçici kml oluştur
-        gecici_kml = dosya_yolu.replace('.kmz', '.kml')
-        
-        # Geopandas ve Fiona ile KML olarak yaz (Sürücü LIBKML)
-        try:
-            gdf.to_file(gecici_kml, driver="LIBKML")
-        except Exception as e:
-            logging.error(f"KML yazılırken hata (KMZ oluşturma adımı 1): {e}")
-            raise
-            
-        # Ziple (.kmz oluştur)
-        try:
-            with zipfile.ZipFile(dosya_yolu, 'w', zipfile.ZIP_DEFLATED) as zf:
-                zf.write(gecici_kml, arcname='doc.kml')
-        except Exception as e:
-            logging.error(f"KMZ zipleme hatası (KMZ oluşturma adımı 2): {e}")
-            raise
-        finally:
-            # İşlem bittikten sonra geçici KML dosyasını sil
-            if os.path.exists(gecici_kml):
-                os.remove(gecici_kml)
-                
-        logging.info(f"KMZ dönüşümü başarıyla tamamlandı: {dosya_yolu}")
+        # Geçici KML, hedef yoldan bağımsız ayrı bir geçici klasörde oluşturulur.
+        with tempfile.TemporaryDirectory(prefix="geoconv_kmz_") as gecici_klasor:
+            gecici_kml = os.path.join(gecici_klasor, "doc.kml")
+            try:
+                self.kml_yazici.yaz(gdf, gecici_kml)
+            except Exception as e:
+                logger.error(f"KML yazılırken hata (KMZ oluşturma adımı 1): {e}")
+                raise
 
-class WktOkuyucu(VeriOkuyucuBase):
-    """WKT formatındaki verileri okur."""
-    def oku(self, dosya_yolu: str) -> gpd.GeoDataFrame:
-        logging.info(f"WktOkuyucu ile okunuyor: {dosya_yolu}")
-        with open(dosya_yolu, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            
-        geoms = []
-        for line in lines:
-            line = line.strip()
-            if line:
-                try:
-                    geoms.append(wkt.loads(line))
-                except Exception as e:
-                    logging.warning(f"WKT parse hatası, satır atlanıyor: {e}")
-                    
-        if not geoms:
-            raise ValueError("Dosyada geçerli bir WKT geometrisi bulunamadı.")
-            
-        return gpd.GeoDataFrame(geometry=geoms)
+            try:
+                with zipfile.ZipFile(dosya_yolu, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    zf.write(gecici_kml, arcname='doc.kml')
+            except Exception as e:
+                logger.error(f"KMZ zipleme hatası (KMZ oluşturma adımı 2): {e}")
+                raise
 
+        logger.info(f"KMZ dönüşümü başarıyla tamamlandı: {dosya_yolu}")
+
+
+# ---------------------------------------------------------------------------
+# Yönetici
+# ---------------------------------------------------------------------------
 
 class DonusturucuYoneticisi:
     """Uzantılara göre uygun okuyucu ve yazıcı sınıfları çalıştıran yönetici (Factory)."""
-    
+
     def __init__(self):
         # Okuyucu haritalaması
         self.okuyucular = {
             '.csv': CsvOkuyucu(),
             '.shp': GenelOkuyucu(),
+            '.zip': ZipShapefileOkuyucu(),
             '.gml': GenelOkuyucu(),
             '.geojson': GenelOkuyucu(),
-            '.kml': GenelOkuyucu(),
-            '.kmz': GenelOkuyucu(),
+            '.json': GenelOkuyucu(),
+            '.kml': KmlOkuyucu(),
+            '.kmz': KmzOkuyucu(),
             '.gpkg': GenelOkuyucu(),
+            '.gpx': GpxOkuyucu(),
             '.wkt': WktOkuyucu()
         }
-        
+
         # Yazıcı haritalaması
         self.yazicilar = {
             '.csv': CsvYazici(),
-            '.shp': GenelYazici(),
+            '.shp': GenelYazici(surucu='ESRI Shapefile'),
             '.geojson': GenelYazici(surucu='GeoJSON'),
             '.gpkg': GenelYazici(surucu='GPKG'),
-            '.kml': GenelYazici(surucu='LIBKML'),
+            '.kml': KmlYazici(),
             '.kmz': KmzYazici(),
-            '.ncz': NetcadGMLYazici(), # Kullanıcı NCZ isterse NetCAD uyumlu GML yazıyoruz.
-            '.gml': NetcadGMLYazici(), # Varsayılan GML çıktısını Serhat'ın özel TKGM koduna yönlendiriyoruz.
-            '.wkt': CsvYazici()        # WKT aslında geometri sütunu içeren bir CSV gibi çıktı üretebilir. Ancak daha temiz olsun diye aşağıda WktYazici da yazabiliriz.
+            '.ncz': NetcadGMLYazici(),  # Kullanıcı NCZ isterse NetCAD uyumlu GML yazıyoruz.
+            '.gml': NetcadGMLYazici(),  # Varsayılan GML çıktısını Serhat'ın özel TKGM koduna yönlendiriyoruz.
+            '.wkt': WktYazici()
         }
 
-    def format_algila_ve_donustur(self, girdi_yolu: str, cikti_yolu: str, hedef_kolonlar=None, geometri_kolonu=None):
+    def format_algila_ve_donustur(self, girdi_yolu: str, cikti_yolu: str, hedef_kolonlar=None,
+                                  geometri_kolonu=None, kaynak_crs=None, hedef_crs=None):
+        """Girdiyi okur, (isteğe bağlı) CRS atar/dönüştürür, kolon filtreler ve çıktıyı yazar.
+
+        kaynak_crs: Girdide CRS yoksa atanacak CRS (verilmezse EPSG:4326). Girdide farklı CRS
+                    varsa ve bu parametre açıkça verildiyse girdinin CRS'si bununla değiştirilir.
+        hedef_crs:  Verilirse veri yazılmadan önce bu CRS'ye dönüştürülür (to_crs).
+        """
         girdi_uzanti = os.path.splitext(girdi_yolu)[1].lower()
         cikti_uzanti = os.path.splitext(cikti_yolu)[1].lower()
 
@@ -281,81 +632,127 @@ class DonusturucuYoneticisi:
             raise ValueError(f"Desteklenmeyen çıktı formatı: {cikti_uzanti}")
 
         if cikti_uzanti == '.ncz':
-            logging.info("Uyarı: Açık kaynak kütüphaneler ile doğrudan binary (.ncz) oluşturulamaz. Dosya Netcad'in GML formatı standartlarında (Netcad GML / TKGM) dışa aktarılacaktır.")
+            logger.info("Uyarı: Açık kaynak kütüphaneler ile doğrudan binary (.ncz) oluşturulamaz. Dosya Netcad'in GML formatı standartlarında (Netcad GML / TKGM) dışa aktarılacaktır.")
 
-        logging.info("Dönüşüm başlatılıyor...")
-        
-        # Eğer kullanıcı özellikle bir geometri kolonu belirttiyse ve dosya CSV ise, özel parse yapabiliriz. 
-        # Ancak zaten CsvOkuyucu genel olarak okuyor, biz CsvOkuyucu yerine burada okunan GDF üzerinde işlem yapalım.
-        gdf = okuyucu.oku(girdi_yolu)
-        
-        # EĞER Kullanıcı manuel bir Geometri kolonu seçmişse ve bu kolon WKT ise onu geometry olarak ayarla
-        if geometri_kolonu and geometri_kolonu in gdf.columns and geometri_kolonu != 'geometry':
+        logger.info("Dönüşüm başlatılıyor...")
+        hedef_kolonlar = list(hedef_kolonlar) if hedef_kolonlar else None  # çağıranın listesini değiştirme
+
+        # 1. Oku (CSV okuyucu kullanıcı geometri kolonunu doğrudan kullanır)
+        gdf = okuyucu.oku(girdi_yolu, geometri_kolonu=geometri_kolonu)
+
+        # Diğer formatlarda kullanıcı manuel bir WKT geometri kolonu seçmişse onu geometri yap
+        if (geometri_kolonu and not isinstance(okuyucu, CsvOkuyucu)
+                and geometri_kolonu in gdf.columns and geometri_kolonu != gdf.geometry.name):
             try:
-                def guvenli_wkt(deger):
-                    try: return wkt.loads(str(deger))
-                    except: return None
-                gdf['geometry'] = gdf[geometri_kolonu].apply(guvenli_wkt)
-                gdf = gdf.dropna(subset=['geometry'])
-                gdf = gdf.set_geometry('geometry')
-                logging.info(f"Kullanıcı seçimiyle '{geometri_kolonu}' geometri olarak ayarlandı.")
+                yeni_geom = gdf[geometri_kolonu].apply(guvenli_wkt)
+                gecerli = yeni_geom.notna()
+                gdf = gdf.loc[gecerli].copy()
+                gdf = gdf.set_geometry(gpd.GeoSeries(yeni_geom[gecerli], index=gdf.index, crs=gdf.crs))
+                logger.info(f"Kullanıcı seçimiyle '{geometri_kolonu}' geometri olarak ayarlandı.")
             except Exception as e:
-                logging.warning(f"Kullanıcı geometri kolonu ({geometri_kolonu}) işlenirken hata: {e}")
+                logger.warning(f"Kullanıcı geometri kolonu ({geometri_kolonu}) işlenirken hata: {e}")
+
+        if gdf.geometry.name != 'geometry':
+            gdf = gdf.rename_geometry('geometry')
+
+        # 1.2 CRS ata / dönüştür
+        gdf = crs_ata(gdf, kaynak_crs)
+        if hedef_crs:
+            logger.info(f"CRS dönüşümü: {gdf.crs.to_string()} -> {hedef_crs}")
+            gdf = gdf.to_crs(hedef_crs)
 
         # GPKG/SHP'de 'geom' adı geometri kolonu için rezerve edildiğinden çakışmayı önlemek için adını değiştir
         for col_name in list(gdf.columns):
-            if col_name.lower() == 'geom' and col_name != 'geometry':
+            if str(col_name).lower() == 'geom' and col_name != 'geometry':
                 new_col_name = f"{col_name}_data"
-                gdf.rename(columns={col_name: new_col_name}, inplace=True)
+                gdf = gdf.rename(columns={col_name: new_col_name})
                 if hedef_kolonlar and col_name in hedef_kolonlar:
                     hedef_kolonlar[hedef_kolonlar.index(col_name)] = new_col_name
-                
+
         # EĞER Kullanıcı manuel öznitelik (kolon) filtresi belirlediyse
-        if hedef_kolonlar and isinstance(hedef_kolonlar, list) and len(hedef_kolonlar) > 0:
+        if hedef_kolonlar:
             # Sadece var olan kolonları al, geometry zorunlu ekle
             secilecekler = [col for col in hedef_kolonlar if col in gdf.columns]
+            eksikler = [col for col in hedef_kolonlar if col not in gdf.columns]
+            if eksikler:
+                logger.warning(f"İstenen ama bulunamayan kolonlar yok sayıldı: {eksikler}")
             if 'geometry' not in secilecekler:
                 secilecekler.append('geometry')
             gdf = gdf[secilecekler]
-            logging.info(f"Kullanıcı seçimiyle sadece şu kolonlar dışa aktarılacak: {secilecekler}")
-        
+            logger.info(f"Kullanıcı seçimiyle sadece şu kolonlar dışa aktarılacak: {secilecekler}")
+
         # 1.5. Gereksiz KML/GeoJSON Sütunlarını Temizle (Eğer veri kml veya togeojson üzerinden geldiyse kirlilik olmasın)
-        kml_gereksiz_alanlar = [
-            'Name', 'description', 'timestamp', 'begin', 'end', 
-            'altitudeMode', 'tessellate', 'extrude', 'visibility', 
+        kml_gereksiz_alanlar = {k.lower() for k in [
+            'Name', 'description', 'timestamp', 'begin', 'end',
+            'altitudeMode', 'tessellate', 'extrude', 'visibility',
             'drawOrder', 'icon', 'snippet'
-        ]
-        
+        ]}
+
         dusurulecekler = []
         for kolon in gdf.columns:
-            if kolon in kml_gereksiz_alanlar or kolon.lower() in [k.lower() for k in kml_gereksiz_alanlar]:
-                # Sadece eğer tüm değerleri null, boş, 0 veya -1 ise düşür
-                # veya kullanıcı verisi olmadığından emin olmak için direkt düşürebiliriz
-                # Kullanıcı kendi "Name" alanını oluşturmuş olabilir. Bu yüzden değerlerin boş veya standart olup olmadığına bakalım.
-                essiz_degerler = gdf[kolon].dropna().unique()
-                if len(essiz_degerler) == 0: # Tümü boş
-                    dusurulecekler.append(kolon)
-                elif all(val in [-1, 0, "-1", "0", ""] for val in essiz_degerler):
-                    dusurulecekler.append(kolon)
-                
+            if kolon == 'geometry' or str(kolon).lower() not in kml_gereksiz_alanlar:
+                continue
+            # Kullanıcı kendi "Name" alanını oluşturmuş olabilir; yalnız boş/varsayılan değerliyse düşür.
+            essiz_degerler = gdf[kolon].dropna().unique()
+            if len(essiz_degerler) == 0:  # Tümü boş
+                dusurulecekler.append(kolon)
+            elif all(val in [-1, 0, "-1", "0", ""] for val in essiz_degerler):
+                dusurulecekler.append(kolon)
+
         if dusurulecekler:
             gdf = gdf.drop(columns=dusurulecekler)
-            logging.info(f"Gereksiz varsayılan sütunlar temizlendi: {dusurulecekler}")
+            logger.info(f"Gereksiz varsayılan sütunlar temizlendi: {dusurulecekler}")
 
-        # Ayrıca ESRI Shapefile kısıtlaması nedeniyle tamamen boş (NA/NULL) tüm sütunları da düşürebiliriz (opsiyonel ama iyi olabilir)
-        tum_bos_kolonlar = [col for col in gdf.columns if gdf[col].isnull().all() and col != 'geometry']
+        # ESRI Shapefile kısıtlaması nedeniyle tamamen boş (NA/NULL) sütunları da düşür
+        tum_bos_kolonlar = [col for col in gdf.columns if col != 'geometry' and gdf[col].isnull().all()]
         if tum_bos_kolonlar:
             gdf = gdf.drop(columns=tum_bos_kolonlar)
-            logging.info(f"Tamamen boş olan sütunlar temizlendi: {tum_bos_kolonlar}")
-            
+            logger.info(f"Tamamen boş olan sütunlar temizlendi: {tum_bos_kolonlar}")
+
         # 2. Yaz
         yazici.yaz(gdf, cikti_yolu)
-        logging.info("Dönüşüm başarıyla tamamlandı!")
+        logger.info("Dönüşüm başarıyla tamamlandı!")
+        return cikti_yolu
 
-# Test Amaçlı Kullanım
+
+# ---------------------------------------------------------------------------
+# Komut satırı arayüzü
+# ---------------------------------------------------------------------------
+
+def arguman_ayristirici() -> argparse.ArgumentParser:
+    ayristirici = argparse.ArgumentParser(
+        prog="cografi_donusturucu",
+        description="Coğrafi veri formatları arasında dönüşüm (CSV, WKT, SHP, ZIP, GeoJSON, GPKG, KML, KMZ, GPX, GML/NCZ).",
+    )
+    ayristirici.add_argument("girdi", help="Girdi dosyası (uzantıya göre format algılanır)")
+    ayristirici.add_argument("cikti", help="Çıktı dosyası (uzantıya göre format algılanır)")
+    ayristirici.add_argument("--kaynak-crs", default=None,
+                             help=f"Girdinin CRS'si (CRS'siz girdilerde varsayılan {VARSAYILAN_CRS})")
+    ayristirici.add_argument("--hedef-crs", default=None, help="Çıktı CRS'si (ör. EPSG:5254); verilirse to_crs yapılır")
+    ayristirici.add_argument("--kolonlar", default=None, help="Virgülle ayrılmış, dışa aktarılacak kolonlar (ör. a,b)")
+    ayristirici.add_argument("--geometri-kolonu", default=None, help="WKT içeren geometri kolonunun adı")
+    ayristirici.add_argument("-v", "--ayrintili", action="store_true", help="Ayrıntılı (DEBUG) log")
+    return ayristirici
+
+
+def main(argv=None) -> int:
+    args = arguman_ayristirici().parse_args(argv)
+    logging.basicConfig(level=logging.DEBUG if args.ayrintili else logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
+    kolonlar = [k.strip() for k in args.kolonlar.split(",") if k.strip()] if args.kolonlar else None
+    try:
+        DonusturucuYoneticisi().format_algila_ve_donustur(
+            args.girdi, args.cikti,
+            hedef_kolonlar=kolonlar,
+            geometri_kolonu=args.geometri_kolonu,
+            kaynak_crs=args.kaynak_crs,
+            hedef_crs=args.hedef_crs,
+        )
+    except Exception as e:
+        logger.error(f"Dönüşüm başarısız: {e}")
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
-    donusturucu = DonusturucuYoneticisi()
-    # Örnek Kullanım:
-    # donusturucu.format_algila_ve_donustur("ornek_veri.csv", "cikti_veri.ncz")
-    # donusturucu.format_algila_ve_donustur("ornek_veri.shp", "cikti_veri.kml")
-    pass
+    sys.exit(main())

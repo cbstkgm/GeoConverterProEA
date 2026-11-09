@@ -1,395 +1,220 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { desteklenen_formatlar } from './data/formatlar';
-import { MapContainer, TileLayer, LayersControl, GeoJSON, useMap } from 'react-leaflet';
-import JSZip from 'jszip';
-import { kml } from '@tmcw/togeojson';
-import wellknown from 'wellknown';
-import L from 'leaflet';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useDonusturucu, iptalHatasiMi } from './hooks/useDonusturucu';
+import Harita from './components/Harita';
+import DosyaYukleyici from './components/DosyaYukleyici';
+import DonusumPaneli from './components/DonusumPaneli';
+import { VARSAYILAN_HEDEF } from './components/formatSecenekleri';
+import MetinOnizleme from './components/MetinOnizleme';
+import IstatistikKarti from './components/IstatistikKarti';
+import Bildirim from './components/Bildirim';
+import { WGS84, wgs84ZorunluMu } from './lib/katalog';
+import './App.css';
+const KAYNAK_RENK = '#ff4c4c';
+const SONUC_RENK = '#4cc2ff';
 
-const { BaseLayer } = LayersControl;
+const hataMesaji = (err) => err?.message || String(err);
 
-// Harita yüklendiğinde GeoJSON verisine otomatik zoom yapan (FitBounds)
-function BoundingBoxFit({ data }) {
-  const map = useMap();
-  useEffect(() => {
-    if (data) {
-      try {
-        const layer = L.geoJSON(data);
-        const bounds = layer.getBounds();
-        if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [20, 20] });
-        }
-      } catch(e) {
-        console.error("Zoom hatası:", e);
-      }
-    }
-  }, [data, map]);
-  return null;
+function indirmeAdi(orijinalAd, uzanti) {
+  const kok = (orijinalAd || 'donusturulmus_veri').replace(/\.[^./\\]+$/, '') || 'donusturulmus_veri';
+  return kok + uzanti;
 }
 
-// Güvenli Textbox Görüntüleme (DOM donmasını engellemek için metni kısaltır)
-const guvenli_metin_gosterimi = (metin) => {
-  if (!metin) return '';
-  if (metin.length > 50000) {
-    return metin.substring(0, 50000) + "\n\n============================================\n[UYARI]: DOSYA ÇOK BÜYÜK OLDUĞU İÇİN ( " + metin.length.toLocaleString() + " KARAKTER ) GÖSTERİM KISALTILDI.\nTARAYICININ DONMAMASI İÇİN YALNIZCA İLK 50.000 KARAKTER GÖSTERİLİYOR.\n\nVERİNİN TAMAMINI ELDE ETMEK İÇİN 'KOPYALA' VEYA 'İNDİR' BUTONLARINI KULLANIN.\n============================================";
-  }
-  return metin;
-};
-
-// Z=0 ve Z Takılarını Temizleyen Regex Motoru
-const z_degerlerini_sil = (metin) => {
-  if (!metin) return '';
-  let yeni_metin = metin.replace(/ Z /g, ' ').replace(/ Z\(/g, '('); // WKT 'Z' ibarelerini sil
-  yeni_metin = yeni_metin.replace(/ 0(?=,)/g, ''); // WKT: (X Y 0,) -> (X Y,)
-  yeni_metin = yeni_metin.replace(/ 0(?=\))/g, ''); // WKT: (X Y 0) -> (X Y)
-  yeni_metin = yeni_metin.replace(/,\s*0\s*\]/g, ']'); // JSON/GeoJSON: [X, Y, 0] -> [X, Y]
-  return yeni_metin;
+function dosyayiIndir(veri, mime, ad) {
+  // string veya Uint8Array doğrudan BlobPart olarak verilir (ikili veri metne çevrilmez).
+  const blob = new Blob([veri], { type: mime || 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const baglanti = document.createElement('a');
+  baglanti.href = url;
+  baglanti.download = ad;
+  document.body.appendChild(baglanti);
+  baglanti.click();
+  baglanti.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function App() {
-  const [secili_dosya, dosya_ayarla] = useState(null);
-  const [hedef_format, hedef_format_ayarla] = useState('.wkt');
-  const [islem_durumu, islem_durumu_ayarla] = useState('');
-  const [ilerleme, ilerleme_ayarla] = useState(0);
-  const [surukleniyor, surukleniyor_ayarla] = useState(false);
-  const [donusum_tamamlandi, donusum_tamamlandi_ayarla] = useState(false);
-  
-  const [kaynak_kopyalandi, kaynak_kopyalandi_ayarla] = useState(false);
-  const [sonuc_kopyalandi, sonuc_kopyalandi_ayarla] = useState(false);
-  
-  // Z Değerleri temizleme state'leri (Kullanıcı dilediğinde tıklayabilir)
-  const [z_temizle_kaynak, z_temizle_kaynak_ayarla] = useState(false);
-  const [z_temizle_sonuc, z_temizle_sonuc_ayarla] = useState(false);
+  const { oku, donustur, wgs84e, mesgul, ilerleme } = useDonusturucu();
 
-  // Gerçek veri state'leri
-  const [kaynak_geojson, kaynak_geojson_ayarla] = useState(null);
-  const [sonuc_geojson, sonuc_geojson_ayarla] = useState(null);
-  const [kaynak_metin, kaynak_metin_ayarla] = useState('');
-  const [sonuc_metin, sonuc_metin_ayarla] = useState('');
+  const [dosya, setDosya] = useState(null);
+  const [kaynak, setKaynak] = useState(null); // { geojson, uyarilar, istatistik, tahminiCrs }
+  const [kaynakHarita, setKaynakHarita] = useState(null);
+  const [sonuc, setSonuc] = useState(null); // { sonuc, haritaGeojson, istatistik }
 
-  const dosya_girdi_ref = useRef(null);
+  const [hedefFormat, setHedefFormat] = useState(VARSAYILAN_HEDEF);
+  const [kaynakCrs, setKaynakCrs] = useState(WGS84);
+  const [secilenHedefCrs, setHedefCrs] = useState(WGS84);
+  // KML/KMZ yalnızca WGS84 taşıyabilir: bu formatlarda kullanıcının seçimi korunur ama uygulanmaz.
+  const hedefCrsKilitli = wgs84ZorunluMu(hedefFormat);
+  const hedefCrs = hedefCrsKilitli ? WGS84 : secilenHedefCrs;
+  const [zTemizle, setZTemizle] = useState(false);
+  const [hassasiyet, setHassasiyet] = useState(null);
 
-  const dosyayi_oku = async (file) => {
-    if (!file) return;
-    const isim = file.name.toLowerCase();
-    
-    islem_durumu_ayarla('Dosya okunuyor (Büyük veri işlenirken tarayıcı kısa süre bekleyebilir)...');
-    await new Promise(resolve => setTimeout(resolve, 50)); 
-    
-    try {
-      if (isim.endsWith('.kmz')) {
-        const zip = new JSZip();
-        const zipIcerik = await zip.loadAsync(file);
-        let kmlIcerik = null;
-        for (let relativePath in zipIcerik.files) {
-          if (relativePath.toLowerCase().endsWith('.kml')) {
-            kmlIcerik = await zipIcerik.files[relativePath].async('string');
-            break;
-          }
-        }
-        if (kmlIcerik) {
-          const parser = new DOMParser();
-          const xmlDoc = parser.parseFromString(kmlIcerik, 'text/xml');
-          const geojson = kml(xmlDoc);
-          kaynak_geojson_ayarla(geojson);
-          
-          const textJson = JSON.stringify(geojson, null, 2);
-          kaynak_metin_ayarla(textJson);
-          islem_durumu_ayarla(`Kaynak dosya başarıyla okundu. (${textJson.length.toLocaleString()} Karakter)`);
-        } else {
-          alert("KMZ içinde geçerli bir KML bulunamadı.");
-        }
-      } else if (isim.endsWith('.kml')) {
-        const text = await file.text();
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(text, 'text/xml');
-        const geojson = kml(xmlDoc);
-        kaynak_geojson_ayarla(geojson);
-        kaynak_metin_ayarla(JSON.stringify(geojson, null, 2));
-        islem_durumu_ayarla('KML okundu.');
-      } else if (isim.endsWith('.geojson') || isim.endsWith('.json')) {
-        const text = await file.text();
-        const geojson = JSON.parse(text);
-        kaynak_geojson_ayarla(geojson);
-        kaynak_metin_ayarla(JSON.stringify(geojson, null, 2));
-        islem_durumu_ayarla('GeoJSON okundu.');
-      } else {
-        const mock_geo = {
-          type: "Feature",
-          properties: { isim: "Desteklenmeyen Geometri", uyar: "WASM Backend Gerekli" },
-          geometry: { type: "Polygon", coordinates: [[[32.84, 39.91], [32.88, 39.91], [32.88, 39.95], [32.84, 39.95], [32.84, 39.91]]] }
-        };
-        kaynak_geojson_ayarla(mock_geo);
-        kaynak_metin_ayarla("// Dosya doğrudan tarayıcıda parse edilemedi (WASM Backend gerektirir).\n// Test için örnek geometri yüklendi.\n" + JSON.stringify(mock_geo, null, 2));
-      }
-    } catch (err) {
-      console.error("Parse hatası:", err);
-      alert("Dosya okunurken bir hata oluştu: " + err.message);
-      islem_durumu_ayarla('Hata: ' + err.message);
-    }
-  };
+  const [bildirim, setBildirim] = useState(null);
+  const istekNo = useRef(0);
 
-  const dosya_secildi = (event) => {
-    if (event.target.files && event.target.files.length > 0) {
-      const file = event.target.files[0];
-      dosya_ayarla(file);
-      sifirla();
-      dosyayi_oku(file);
-    }
-  };
+  const bildir = useCallback((tur, mesaj) => setBildirim({ tur, mesaj }), []);
+  const hataBildir = useCallback((mesaj) => bildir('hata', mesaj), [bildir]);
 
-  const sifirla = () => {
-    islem_durumu_ayarla('');
-    ilerleme_ayarla(0);
-    donusum_tamamlandi_ayarla(false);
-    kaynak_geojson_ayarla(null);
-    sonuc_geojson_ayarla(null);
-    kaynak_metin_ayarla('');
-    sonuc_metin_ayarla('');
-  };
-
-  const surukleme_basladi = (e) => { e.preventDefault(); e.stopPropagation(); surukleniyor_ayarla(true); };
-  const surukleme_bitti = (e) => { e.preventDefault(); e.stopPropagation(); surukleniyor_ayarla(false); };
-  const dosya_birakildi = (e) => {
-    e.preventDefault(); e.stopPropagation(); surukleniyor_ayarla(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      dosya_ayarla(file);
-      sifirla();
-      dosyayi_oku(file);
-    }
-  };
-
-  const donusumu_baslat = async () => {
-    if (!secili_dosya || !kaynak_geojson) {
-      islem_durumu_ayarla('Lütfen önce desteklenen bir dosya (örn: KMZ) seçin.');
+  const kaynakHaritasiniHazirla = async (geojson, crs, no) => {
+    if (crs === WGS84) {
+      setKaynakHarita(geojson);
       return;
     }
-
-    islem_durumu_ayarla('Dönüştürülüyor... (Devasa Geometriler İşlenirken Bekletebilir)');
-    ilerleme_ayarla(10);
-    donusum_tamamlandi_ayarla(false);
-    
-    await new Promise(resolve => setTimeout(resolve, 50)); 
-
-    const dosya_boyutu = secili_dosya.size;
-    const parca_boyutu = 1024 * 1024 * 2; 
-    let islenen_byte = 0;
-
-    const interval = setInterval(() => {
-      islenen_byte += parca_boyutu;
-      if(islenen_byte > dosya_boyutu) islenen_byte = dosya_boyutu;
-      let yuzde = Math.floor((islenen_byte / dosya_boyutu) * 100);
-      if(yuzde < 10) yuzde = 10;
-      ilerleme_ayarla(yuzde);
-
-      if (islenen_byte >= dosya_boyutu) {
-        clearInterval(interval);
-        setTimeout(() => {
-          ilerleme_ayarla(100);
-          
-          let uretilen_metin = '';
-          if (hedef_format === '.wkt') {
-            try {
-              if (kaynak_geojson.type === 'FeatureCollection') {
-                uretilen_metin = kaynak_geojson.features.map(f => wellknown.stringify(f.geometry)).join('\n');
-              } else {
-                uretilen_metin = wellknown.stringify(kaynak_geojson.geometry || kaynak_geojson);
-              }
-            } catch(e) {
-              uretilen_metin = "WKT Çeviri Hatası: " + e.message;
-            }
-          } else if (hedef_format === '.geojson') {
-            uretilen_metin = JSON.stringify(kaynak_geojson, null, 2);
-          } else {
-            uretilen_metin = `// ${hedef_format} formatı tarayıcıda doğrudan çevrilemez. Backend bağlantısı gereklidir.`;
-          }
-
-          sonuc_geojson_ayarla(kaynak_geojson); 
-          sonuc_metin_ayarla(uretilen_metin);
-          donusum_tamamlandi_ayarla(true);
-          islem_durumu_ayarla(`Başarılı: '${secili_dosya.name}' -> '${hedef_format}' dönüştürüldü.`);
-        }, 150);
-      }
-    }, 100);
-  };
-
-  const metin_kopyala = (metin, tip) => {
-    navigator.clipboard.writeText(metin);
-    if (tip === 'kaynak') {
-      kaynak_kopyalandi_ayarla(true);
-      setTimeout(() => kaynak_kopyalandi_ayarla(false), 2000);
-    } else {
-      sonuc_kopyalandi_ayarla(true);
-      setTimeout(() => sonuc_kopyalandi_ayarla(false), 2000);
+    try {
+      const donmus = await wgs84e(geojson, crs);
+      if (no === istekNo.current) setKaynakHarita(donmus);
+    } catch (err) {
+      if (no !== istekNo.current || iptalHatasiMi(err)) return;
+      setKaynakHarita(null);
+      hataBildir(`Kaynak harita için ${crs} → WGS84 dönüşümü yapılamadı: ${hataMesaji(err)}`);
     }
   };
 
-  const indir_tetikle = () => {
-    // İndirme yaparken Z Temizle işaretli ise, metni süzüp (filtreleyip) indir
-    const indirilecek_veri = z_temizle_sonuc ? z_degerlerini_sil(sonuc_metin) : sonuc_metin;
-    const blob = new Blob([indirilecek_veri], { type: 'text/plain;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `donusturulmus_veri${hedef_format}`;
-    link.click();
+  const dosyaSecildi = async (yeniDosya) => {
+    const no = ++istekNo.current;
+    setDosya(yeniDosya);
+    setKaynak(null);
+    setKaynakHarita(null);
+    setSonuc(null);
+    bildir('bilgi', `'${yeniDosya.name}' okunuyor…`);
+    try {
+      const okunan = await oku(yeniDosya);
+      if (no !== istekNo.current) return;
+      const crs = okunan.tahminiCrs || WGS84;
+      setKaynak(okunan);
+      setKaynakCrs(crs);
+      const ozet = `'${yeniDosya.name}' okundu: ${okunan.istatistik?.objeSayisi ?? okunan.geojson.features.length} obje.`;
+      if (!okunan.tahminiCrs && okunan.istatistik?.koordinatSayisi > 0) {
+        // Koordinatlar WGS84 aralığında değil: yanlış yerde çizmek yerine kullanıcıdan CRS iste.
+        bildir('bilgi', `${ozet} Koordinatlar WGS84 aralığında değil; haritada görmek için kaynak koordinat sistemini seçin.`);
+        return;
+      }
+      bildir('basari', ozet);
+      await kaynakHaritasiniHazirla(okunan.geojson, crs, no);
+    } catch (err) {
+      if (no !== istekNo.current || iptalHatasiMi(err)) return;
+      hataBildir(`Dosya okunamadı: ${hataMesaji(err)}`);
+    }
   };
 
-  const HaritaBileseni = ({ data, renk }) => {
-    return (
-      <MapContainer center={[39.93, 32.86]} zoom={12} style={{ height: '100%', width: '100%' }} preferCanvas={true}>
-        <LayersControl position="topright">
-          <BaseLayer checked name="Google Uydu">
-            <TileLayer url="http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}" attribution="&copy; Google" />
-          </BaseLayer>
-          <BaseLayer name="Google Harita">
-            <TileLayer url="http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}" attribution="&copy; Google" />
-          </BaseLayer>
-          <BaseLayer name="OpenStreetMap">
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
-          </BaseLayer>
-        </LayersControl>
-        {data && <GeoJSON data={data} style={{ color: renk, weight: 2, fillColor: renk, fillOpacity: 0.3 }} />}
-        <BoundingBoxFit data={data} />
-      </MapContainer>
-    );
+  const kaynakCrsDegisti = (crs) => {
+    setKaynakCrs(crs);
+    setSonuc(null);
+    if (kaynak) {
+      const no = ++istekNo.current;
+      kaynakHaritasiniHazirla(kaynak.geojson, crs, no);
+    }
   };
+
+  const donusumuBaslat = async () => {
+    if (!kaynak) return;
+    const no = ++istekNo.current;
+    try {
+      const yeni = await donustur(kaynak.geojson, hedefFormat, { kaynakCrs, hedefCrs, zTemizle, hassasiyet });
+      if (no !== istekNo.current) return;
+      setSonuc(yeni);
+      bildir('basari', `Dönüştürüldü: '${dosya.name}' → ${yeni.sonuc.uzanti} (${hedefCrs}).`);
+    } catch (err) {
+      if (no !== istekNo.current || iptalHatasiMi(err)) return;
+      hataBildir(`Dönüşüm başarısız: ${hataMesaji(err)}`);
+    }
+  };
+
+  const indir = () => {
+    if (!sonuc) return;
+    const { veri, mime, uzanti } = sonuc.sonuc;
+    const ad = indirmeAdi(dosya?.name, uzanti);
+    try {
+      dosyayiIndir(veri, mime, ad);
+      bildir('basari', `'${ad}' indirildi.`);
+    } catch (err) {
+      hataBildir(`İndirme başarısız: ${hataMesaji(err)}`);
+    }
+  };
+
+  const kaynakMetni = useMemo(() => (kaynak ? JSON.stringify(kaynak.geojson, null, 2) : ''), [kaynak]);
+  const sonucOnizleme = sonuc?.sonuc.onizleme ?? '';
+  const sonucKopya = typeof sonuc?.sonuc.veri === 'string' ? sonuc.sonuc.veri : sonucOnizleme;
 
   return (
     <div className="uygulama-kapsayici">
-      <div className="baslik-alani">
+      <header className="baslik-alani">
         <h1>GeoConverterProEA</h1>
-        <p className="aciklama">Gelişmiş Harita & Geometri Dönüştürücüsü</p>
-      </div>
+        <p className="aciklama">Gelişmiş Harita &amp; Geometri Dönüştürücüsü — veriler tarayıcıdan çıkmaz</p>
+        <Bildirim bildirim={bildirim} onKapat={() => setBildirim(null)} />
+      </header>
 
-      <div className="grid-kapsayici">
-        
-        {/* SOL SÜTUN: Kaynak Veri */}
-        <div className="fluent-panel">
-          <h2 className="panel-baslik">1. Kaynak Veri</h2>
-          
-          <div 
-            className={`dosya-yukleme-alani ${surukleniyor ? 'surukleniyor' : ''}`}
-            onDragOver={surukleme_basladi}
-            onDragLeave={surukleme_bitti}
-            onDrop={dosya_birakildi}
-            onClick={() => dosya_girdi_ref.current.click()}
-          >
-            <div className="dosya-yukleme-ikon">📂</div>
-            <p>{secili_dosya ? secili_dosya.name : 'Dosya Seç (Tıklayın veya Sürükleyin)'}</p>
-            <input type="file" ref={dosya_girdi_ref} style={{ display: 'none' }} onChange={dosya_secildi} />
+      <main className="grid-kapsayici">
+        <section className="fluent-panel" aria-labelledby="kaynak-baslik">
+          <h2 id="kaynak-baslik" className="panel-baslik">1. Kaynak Veri</h2>
+          <DosyaYukleyici dosyaAdi={dosya?.name} onDosya={dosyaSecildi} devreDisi={mesgul} />
+
+          <div className="harita-alani harita-kaynak">
+            {kaynakHarita ? (
+              <Harita veri={kaynakHarita} renk={KAYNAK_RENK} etiket="Kaynak veri haritası" />
+            ) : (
+              <div className="harita-bos">Harita (Kaynak)</div>
+            )}
           </div>
 
-          <div className="harita-alani" style={{ height: '300px' }}>
-            {kaynak_geojson ? <HaritaBileseni data={kaynak_geojson} renk="#ff4c4c" /> : <div className="harita-bos">Harita (Kaynak)</div>}
+          <IstatistikKarti baslik="Kaynak istatistikleri" istatistik={kaynak?.istatistik} uyarilar={kaynak?.uyarilar} />
+
+          <MetinOnizleme
+            id="kaynak-metin"
+            baslik="Kaynak veri (GeoJSON)"
+            metin={kaynakMetni}
+            placeholder="Dosya seçildiğinde GeoJSON karşılığı burada görünecek..."
+            onHata={hataBildir}
+          />
+        </section>
+
+        <DonusumPaneli
+          hedefFormat={hedefFormat}
+          onHedefFormat={setHedefFormat}
+          kaynakCrs={kaynakCrs}
+          onKaynakCrs={kaynakCrsDegisti}
+          hedefCrs={hedefCrs}
+          onHedefCrs={setHedefCrs}
+          hedefCrsKilitli={hedefCrsKilitli}
+          zTemizle={zTemizle}
+          onZTemizle={setZTemizle}
+          hassasiyet={hassasiyet}
+          onHassasiyet={setHassasiyet}
+          onBaslat={donusumuBaslat}
+          baslatilabilir={Boolean(kaynak && hedefFormat)}
+          mesgul={mesgul}
+          ilerleme={ilerleme}
+        />
+
+        <section className="fluent-panel" aria-labelledby="sonuc-baslik">
+          <h2 id="sonuc-baslik" className="panel-baslik">2. Sonuç Veri</h2>
+
+          <div className="harita-alani harita-sonuc">
+            {sonuc?.haritaGeojson ? (
+              <Harita veri={sonuc.haritaGeojson} renk={SONUC_RENK} etiket="Sonuç veri haritası" />
+            ) : (
+              <div className="harita-bos">Harita (Sonuç)</div>
+            )}
           </div>
 
-          {/* KAYNAK METİN KUTUSU */}
-          <div className="metin-kutusu-kapsayici">
-            <div className="metin-kutusu-baslik">
-              <span>Kaynak Veri Özeti</span>
-              <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
-                <label style={{fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: '#a0a0a0', userSelect: 'none'}}>
-                  <input 
-                    type="checkbox" 
-                    checked={z_temizle_kaynak} 
-                    onChange={(e) => z_temizle_kaynak_ayarla(e.target.checked)} 
-                  /> 
-                  Z=0 Temizle
-                </label>
-                <button 
-                  onClick={() => metin_kopyala(z_temizle_kaynak ? z_degerlerini_sil(kaynak_metin) : kaynak_metin, 'kaynak')} 
-                  className="kopyala-butonu"
-                  disabled={!kaynak_metin}
-                >
-                  {kaynak_kopyalandi ? '✅ Kopyalandı' : '📋 Kopyala'}
-                </button>
-              </div>
-            </div>
-            <textarea 
-              readOnly 
-              value={guvenli_metin_gosterimi(z_temizle_kaynak ? z_degerlerini_sil(kaynak_metin) : kaynak_metin)} 
-              placeholder="Dosya seçildiğinde metin karşılığı burada görünecek..." 
-            />
-          </div>
+          <IstatistikKarti baslik="Sonuç istatistikleri" istatistik={sonuc?.istatistik} />
 
-        </div>
-
-        {/* ORTA SÜTUN: Kontrol (Dönüştürme) Paneli */}
-        <div className="fluent-panel kontrol-paneli">
-          <div className="form-grubu">
-            <label>Dönüşecek Dosya (Hedef) Seçin:</label>
-            <select value={hedef_format} onChange={(e) => hedef_format_ayarla(e.target.value)}>
-              {desteklenen_formatlar.map((grup, i) => (
-                <optgroup key={i} label={grup.kategori}>
-                  {grup.formatlar.map((fmt, j) => (
-                    <option key={`${i}-${j}`} value={fmt.uzanti}>{fmt.aciklama} ({fmt.uzanti})</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-
-          <button 
-            className="fluent-buton" 
-            onClick={donusumu_baslat}
-            disabled={!secili_dosya || (ilerleme > 0 && ilerleme < 100)}
-          >
-            Dönüştürmeyi Başlat
-          </button>
-
-          <div className={`ilerleme-kapsayici ${ilerleme > 0 ? 'aktif' : ''}`}>
-            <div className="ilerleme-cubugu" style={{ width: `${ilerleme}%` }}></div>
-          </div>
-          <p className="sonuc-bilgi">{islem_durumu}</p>
-        </div>
-
-        {/* SAĞ SÜTUN: Hedef / Çıktı Veri */}
-        <div className="fluent-panel">
-          <h2 className="panel-baslik">2. Sonuç Veri</h2>
-          
-          <div className="harita-alani" style={{ marginTop: 0, height: '350px' }}>
-            {sonuc_geojson && donusum_tamamlandi ? <HaritaBileseni data={sonuc_geojson} renk="#4cc2ff" /> : <div className="harita-bos">Harita (Sonuç)</div>}
-          </div>
-
-          {/* SONUÇ METİN KUTUSU */}
-          <div className="metin-kutusu-kapsayici">
-            <div className="metin-kutusu-baslik">
-              <span>Dönüştürülen Veri ({hedef_format})</span>
-              <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
-                <label style={{fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: '#a0a0a0', userSelect: 'none'}}>
-                  <input 
-                    type="checkbox" 
-                    checked={z_temizle_sonuc} 
-                    onChange={(e) => z_temizle_sonuc_ayarla(e.target.checked)} 
-                  /> 
-                  Z=0 Temizle
-                </label>
-                <button 
-                  onClick={() => metin_kopyala(z_temizle_sonuc ? z_degerlerini_sil(sonuc_metin) : sonuc_metin, 'sonuc')} 
-                  className="kopyala-butonu"
-                  disabled={!donusum_tamamlandi || !sonuc_metin}
-                >
-                  {sonuc_kopyalandi ? '✅ Kopyalandı' : '📋 Kopyala'}
-                </button>
-              </div>
-            </div>
-            <textarea 
-              readOnly 
-              value={guvenli_metin_gosterimi(z_temizle_sonuc ? z_degerlerini_sil(sonuc_metin) : sonuc_metin)} 
-              placeholder="Dönüşüm tamamlandığında çıktı verisi burada görünecek..." 
-            />
-          </div>
+          <MetinOnizleme
+            id="sonuc-metin"
+            baslik={`Dönüştürülen veri${sonuc ? ` (${sonuc.sonuc.uzanti})` : ''}`}
+            metin={sonucOnizleme}
+            kopyalanacak={sonucKopya}
+            placeholder="Dönüşüm tamamlandığında çıktı burada görünecek..."
+            onHata={hataBildir}
+          />
 
           <div className="buton-grubu">
-            <button className="fluent-buton" disabled={!donusum_tamamlandi} onClick={indir_tetikle}>
-              ⬇️ Dosyayı İndir
+            <button type="button" className="fluent-buton" disabled={!sonuc} onClick={indir}>
+              ⬇️ Dosyayı İndir{sonuc ? ` (${indirmeAdi(dosya?.name, sonuc.sonuc.uzanti)})` : ''}
             </button>
           </div>
-
-        </div>
-
-      </div>
+        </section>
+      </main>
     </div>
   );
 }

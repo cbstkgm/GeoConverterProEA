@@ -1,4 +1,10 @@
-export const desteklenen_formatlar = [
+// Format kataloğu. `durum` alanı dürüstçe gösterir:
+//   'tarayici'  → bu uygulamada tarayıcıda gerçekten yazılabiliyor
+//   'planlanan' → henüz desteklenmiyor (yol haritasında)
+// 'tarayici' durumu elle yazılmaz; tek kaynak olan DESTEKLENEN_CIKTILAR'dan türetilir.
+import { DESTEKLENEN_CIKTILAR } from '../lib/katalog.js';
+
+const KATALOG = [
   {
     kategori: "CAD, Yerli Yazılımlar ve Üretim",
     formatlar: [
@@ -94,16 +100,34 @@ export const desteklenen_formatlar = [
   }
 ];
 
-export const tum_formatlari_duz_liste = () => {
-  let liste = [];
-  desteklenen_formatlar.forEach(grup => {
-    grup.formatlar.forEach(fmt => {
-      liste.push({
-        kategori: grup.kategori,
-        uzanti: fmt.uzanti,
-        aciklama: fmt.aciklama
-      });
-    });
-  });
-  return liste;
-};
+const TARAYICI_UZANTILARI = new Set(DESTEKLENEN_CIKTILAR.map((c) => c.uzanti));
+
+// Uzantı olmayan girdiler (ör. "postgis") hiçbir zaman 'tarayici' olamaz.
+export const formatDurumu = (uzanti) =>
+  typeof uzanti === 'string' && uzanti.startsWith('.') && TARAYICI_UZANTILARI.has(uzanti.toLowerCase())
+    ? 'tarayici'
+    : 'planlanan';
+
+// Katalogda olmayan desteklenen çıktılar da listede görünsün (tutarsızlık olmasın).
+const katalogdakiler = new Set(KATALOG.flatMap((g) => g.formatlar.map((f) => f.uzanti)));
+const eksikler = DESTEKLENEN_CIKTILAR.filter((c) => !katalogdakiler.has(c.uzanti));
+
+export const desteklenen_formatlar = [
+  ...KATALOG,
+  ...(eksikler.length
+    ? [{ kategori: 'Diğer Desteklenen Çıktılar', formatlar: eksikler.map(({ uzanti, aciklama }) => ({ uzanti, aciklama })) }]
+    : []),
+].map((grup) => ({
+  kategori: grup.kategori,
+  formatlar: grup.formatlar.map((f) => ({ ...f, durum: formatDurumu(f.uzanti) })),
+}));
+
+export const tum_formatlari_duz_liste = () =>
+  desteklenen_formatlar.flatMap((grup) =>
+    grup.formatlar.map((fmt) => ({
+      kategori: grup.kategori,
+      uzanti: fmt.uzanti,
+      aciklama: fmt.aciklama,
+      durum: fmt.durum,
+    })),
+  );

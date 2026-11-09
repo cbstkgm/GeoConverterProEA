@@ -1,37 +1,129 @@
-# 🌍 GeoConverterProEA
+# GeoConverterProEA
 
-GeoConverterProEA, tarayıcı üzerinde çalışan, yüksek performanslı ve modern (Fluent Design) arayüze sahip bir Harita & Geometri Dönüştürme asistanıdır. Özellikle büyük boyutlu CBS verilerini okuma, otomatik harita odaklama ve anında WKT/GeoJSON formatlarına dönüştürme yeteneklerine sahiptir.
+GeoConverterProEA, CBS (Coğrafi Bilgi Sistemi) verilerini **tamamen tarayıcıda** okuyan, koordinat sistemleri arasında dönüştüren, haritada gösteren ve farklı formatlarda dışa aktaran bir web uygulamasıdır. Dosyalarınız hiçbir sunucuya gönderilmez.
 
-## 🚀 Canlı Önizleme
-Uygulamayı yüklemeye gerek kalmadan anında test etmek için aşağıdaki bağlantıya tıklayabilirsiniz:
-
-👉 **[Uygulamayı Canlı Test Etmek İçin Tıklayın (GitHub Pages)](https://cbstkgm.github.io/GeoConverterProEA/)**
+**Canlı sürüm:** https://cbstkgm.github.io/GeoConverterProEA/
 
 ---
 
-## 🌟 Temel Özellikler
-- **Gerçek Zamanlı KMZ Oku/Çevir:** `JSZip` ve `toGeoJSON` kullanılarak KMZ dosyaları anında tarayıcı bellek sınırları içerisinde ayrıştırılır. Backend'e dosya göndermez, tamamen güvenlidir.
-- **Yüksek Performanslı Harita Rendering:** Leaflet.js altyapısına eklenen **Canvas** optimizasyonu ile on binlerce koordinata sahip parseller tarayıcıyı dondurmadan haritada saniyeler içinde çizilir.
-- **Akıllı Metin Kutusu Koruması:** Megabaytlarca boyuta ulaşan veri kodlarının (GeoJSON/WKT) arayüzü kilitlemesini önlemek için akıllı "Karakter Kırpma" modülü mevcuttur. Panoya kopyalama ve İndirme işlemlerinde veri orijinal boyutuyla kayıpsız korunur.
-- **Tek Tıkla WKT Çevirisi:** Haritacılık ve veritabanı dünyasının standart metin formatı olan **Well-Known Text (WKT)** standartına dönüşüm işlemlerini gerçekleştirir.
-- **Otomatik Zoom (Auto FitBounds):** Veriler yüklendiği anda manuel harita kaydırmaya gerek kalmadan, uygulama coğrafi konuma (Bounding Box) otomatik olarak hizalanır.
+## Özellikler
 
-## 🛠 Kurulum ve Çalıştırma
-Projeyi kendi yerel (local) ortamınızda geliştirmek için aşağıdaki komutları kullanabilirsiniz:
+- **Çoklu format okuma ve yazma** (ayrıntılar aşağıdaki tablolarda).
+- **Koordinat dönüşümü:** WGS84, Web Mercator, ITRF96 3° TM ve ED50 UTM sistemleri arasında `proj4` ile dönüşüm. Girdinin WGS84 olup olmadığı koordinat aralığından tahmin edilir.
+- **Geometri araçları:** Z (yükseklik) değerlerini kaldırma, koordinat hassasiyetini (ondalık basamak) sınırlama, istatistik (obje sayısı, geometri tipleri, koordinat sayısı, sınır kutusu).
+- **Web Worker:** Okuma ve dönüştürme işlemleri ayrı bir iş parçacığında yürür; büyük dosyalarda arayüz donmaz. Worker kullanılamayan ortamlarda aynı işlemler ana iş parçacığında yapılır.
+- **Harita önizleme:** Leaflet / React-Leaflet ile sonuç haritada gösterilir ve otomatik olarak veriye yakınlaşılır.
+- **Metin önizleme, panoya kopyalama ve indirme.**
+
+### Desteklenen girdi formatları
+
+| Uzantı | Açıklama |
+|---|---|
+| `.geojson`, `.json` | GeoJSON (`FeatureCollection`, tekil `Feature` veya çıplak geometri) |
+| `.kml` | Keyhole Markup Language |
+| `.kmz` | Sıkıştırılmış KML |
+| `.gpx` | GPS Exchange Format |
+| `.wkt`, `.txt` | Well-Known Text (satır başına bir geometri) |
+| `.csv` | WKT sütunu veya enlem/boylam sütunları |
+| `.zip` | Zipli ESRI Shapefile (`.shp` + `.dbf` + `.prj` …) |
+
+### Desteklenen çıktı formatları
+
+| Uzantı | Açıklama |
+|---|---|
+| `.geojson` | GeoJSON |
+| `.wkt` | Well-Known Text (satır başına bir obje) |
+| `.kml` | KML 2.2 |
+| `.kmz` | Sıkıştırılmış KML |
+| `.csv` | WKT sütunlu CSV (UTF-8 BOM, Excel uyumlu) |
+
+Format kataloğunda "planlanan" olarak işaretli diğer formatlar (ör. GeoPackage, DXF) henüz tarayıcıda desteklenmez.
+
+### Koordinat sistemleri
+
+| Kod | Sistem |
+|---|---|
+| EPSG:4326 | WGS84 coğrafi (enlem/boylam) |
+| EPSG:3857 | WGS84 / Web Mercator |
+| EPSG:5253 – 5259 | ITRF96 / 3° TM 27, 30, 33, 36, 39, 42, 45 |
+| EPSG:23035 – 23038 | ED50 / UTM 35N – 38N (Türkiye için 7 parametreli datum dönüşümü) |
+
+---
+
+## Kurulum ve çalıştırma
+
+Node.js 22 veya üstü gerekir.
 
 ```bash
 git clone https://github.com/cbstkgm/GeoConverterProEA.git
 cd GeoConverterProEA
-npm install
-npm run dev
+npm ci
+npm start          # geliştirme sunucusu (npm run dev ile aynı)
 ```
 
-## 🏗 Kullanılan Teknolojiler (Tech Stack)
-- **React & Vite** (Hızlı Kullanıcı Arayüzü)
-- **Vanilla CSS** (Fluent Design & Glassmorphism Mimarisi)
-- **React-Leaflet** (Harita ve Canvas Altlıkları)
-- **JSZip & toGeoJSON** (Kapalı Formatlı CBS verilerini Açma)
-- **Wellknown** (GeoJSON -> WKT Dönüşümleri)
+> **Windows / PowerShell notu:** PowerShell'in betik çalıştırma ilkesi (execution policy) nedeniyle `npm` ve `npx` komutları
+> "running scripts is disabled on this system" hatası verebilir. Bu durumda `npm.cmd` ve `npx.cmd` kullanın:
+>
+> ```powershell
+> npm.cmd ci
+> npm.cmd start
+> npx.cmd vitest run
+> ```
+
+### Komutlar
+
+| Komut | Açıklama |
+|---|---|
+| `npm start` / `npm run dev` | Vite geliştirme sunucusu |
+| `npm run build` | Üretim derlemesi (`dist/`) |
+| `npm run preview` | Derlenmiş sürümü yerelde sunar |
+| `npm test` | Vitest birim testleri (tek sefer) |
+| `npm run test:watch` | Vitest izleme modu |
+| `npm run lint` | oxlint ile statik analiz |
+
+Testler, test edilen dosyanın yanında `src/**/*.test.js` olarak bulunur ve Node ortamında çalışır.
+
+## Proje yapısı
+
+```
+src/
+  lib/          Saf JS çekirdek: okuyucular, yazıcılar, geometri, projeksiyon (Worker + Node uyumlu)
+  workers/      Dönüştürme Web Worker'ı
+  hooks/        useDonusturucu (Worker ile iletişim)
+  components/   React arayüz bileşenleri
+  data/         Format kataloğu
+docs/MIMARI.md  Modül sözleşmeleri
+```
+
+## CI / CD
+
+- **`.github/workflows/ci.yml`** — Pull request'ler ve `main` dışındaki dallar: lint + test + build (Node 22) ve Python testleri (`pytest tests_py`, Python 3.12). Deploy yapılmaz.
+- **`.github/workflows/deploy.yml`** — `main`'e push: `npm ci` → lint → test → build → GitHub Pages'e yayın.
+- **Dependabot** — npm ve GitHub Actions bağımlılıkları için haftalık güncelleme PR'ları.
+
+## Python arka uç (isteğe bağlı)
+
+`cografi_donusturucu.py`, aynı dönüşümlerin masaüstü/sunucu tarafında GeoPandas ile yapılabilmesi için ayrı bir komut satırı aracıdır; web uygulaması bu betiğe ihtiyaç duymaz.
+
+```bash
+pip install -r requirements.txt
+pytest tests_py
+```
+
+Komut satırı kullanımı:
+
+```bash
+python cografi_donusturucu.py girdi.csv cikti.gpkg --kaynak-crs EPSG:4326 --hedef-crs EPSG:5254 --kolonlar ada,parsel --geometri-kolonu wkt
+```
+
+- **Girdi:** `.csv`, `.shp`, `.zip` (Shapefile), `.gml`, `.geojson`, `.json`, `.kml`, `.kmz`, `.gpkg`, `.gpx`, `.wkt`
+- **Çıktı:** `.csv`, `.shp`, `.geojson`, `.gpkg`, `.kml`, `.kmz`, `.wkt`, `.gml` / `.ncz` (Netcad/TKGM uyumlu GML)
+- KML/KMZ çıktısı otomatik olarak WGS84'e (EPSG:4326) dönüştürülür. `-v` ayrıntılı log verir.
+
+## Kullanılan teknolojiler
+
+React 19, Vite 8, Leaflet / React-Leaflet, proj4, shpjs, JSZip, @tmcw/togeojson, @xmldom/xmldom, Vitest, oxlint.
 
 ---
-*Geliştirme - Erdem Alpar*
+
+*Geliştirme: Erdem Alpar*
