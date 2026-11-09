@@ -130,6 +130,19 @@ describe('islemci — donustur', () => {
     expect(kml).toMatch(/30(\.0+)?,40(\.0+)?/);
   });
 
+  it('geometriTipi: çizgi WKT çıktısında POLYGON olarak yazılır ve uyarı döner', async () => {
+    const fc = {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[30, 40], [31, 40], [31, 41]] } }],
+    };
+    const d = await donustur(fc, '.wkt', { kaynakCrs: 'EPSG:4326', hedefCrs: 'EPSG:4326', geometriTipi: 'Polygon' });
+    expect(metneCevir(d.sonuc.veri).trim()).toBe('POLYGON ((30 40, 31 40, 31 41, 30 40))');
+    expect(d.istatistik.geometriTipleri).toEqual({ Polygon: 1 });
+    expect(d.uyarilar.join(' ')).toMatch(/kapatıldı/);
+    const geri = await donustur(d.haritaGeojson, '.wkt', { kaynakCrs: 'EPSG:4326', hedefCrs: 'EPSG:4326', geometriTipi: 'LineString' });
+    expect(metneCevir(geri.sonuc.veri).trim()).toBe('LINESTRING (30 40, 31 40, 31 41, 30 40)');
+  });
+
   it('KML/KMZ çıktısında WGS84 dışı hedef koordinat sistemini reddeder', async () => {
     for (const uzanti of ['.kml', '.KMZ']) {
       await expect(

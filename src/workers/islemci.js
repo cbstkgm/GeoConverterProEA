@@ -5,7 +5,7 @@
 
 import { dosyaOku } from '../lib/okuyucular.js';
 import { dosyaYaz } from '../lib/yazicilar.js';
-import { zDegerleriniKaldir, hassasiyetUygula, istatistikHesapla } from '../lib/geometri.js';
+import { zDegerleriniKaldir, hassasiyetUygula, istatistikHesapla, geometriTipiDonustur } from '../lib/geometri.js';
 import { koordinatDonustur, wgs84OlabilirMi } from '../lib/projeksiyon.js';
 import { WGS84, wgs84ZorunluMu } from '../lib/katalog.js';
 
@@ -71,11 +71,11 @@ export async function oku(girdi, ilerle) {
 }
 
 /**
- * Sözleşmedeki sıra: koordinatDonustur → (zTemizle) zDegerleriniKaldir →
+ * Sözleşmedeki sıra: koordinatDonustur → (geometriTipi) geometriTipiDonustur → (zTemizle) zDegerleriniKaldir →
  * (hassasiyet) hassasiyetUygula → dosyaYaz. Ardından harita için EPSG:4326 kopyası.
  * @param {object} geojson FeatureCollection
  * @param {string} hedefUzanti örn. '.wkt'
- * @param {{ kaynakCrs: string, hedefCrs: string, zTemizle?: boolean, hassasiyet?: number | null }} secenekler
+ * @param {{ kaynakCrs: string, hedefCrs: string, zTemizle?: boolean, hassasiyet?: number | null, geometriTipi?: 'Polygon' | 'LineString' | null }} secenekler
  * @param {(ilerleme: { yuzde: number, asama: string }) => unknown} [ilerle]
  */
 export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
@@ -83,7 +83,7 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
   if (typeof hedefUzanti !== 'string' || hedefUzanti.trim() === '') {
     throw new Error('Hedef dosya formatı belirtilmedi.');
   }
-  const { kaynakCrs, hedefCrs, zTemizle = false, hassasiyet = null } = secenekler || {};
+  const { kaynakCrs, hedefCrs, zTemizle = false, hassasiyet = null, geometriTipi = null } = secenekler || {};
   crsDogrula(kaynakCrs, 'kaynak');
   crsDogrula(hedefCrs, 'hedef');
   if (wgs84ZorunluMu(hedefUzanti) && hedefCrs.trim().toUpperCase() !== WGS84) {
@@ -97,6 +97,14 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
   await bildir(ilerle, 5, 'Koordinatlar dönüştürülüyor');
   if (kaynakCrs !== hedefCrs) {
     fc = koordinatDonustur(fc, kaynakCrs, hedefCrs);
+  }
+
+  const uyarilar = [];
+  if (geometriTipi) {
+    await bildir(ilerle, 25, geometriTipi === 'Polygon' ? 'Çizgiler poligona çevriliyor' : 'Poligonlar çizgiye çevriliyor');
+    const tipSonucu = geometriTipiDonustur(fc, geometriTipi);
+    fc = tipSonucu.geojson;
+    uyarilar.push(...tipSonucu.uyarilar);
   }
 
   if (zTemizle) {
@@ -126,6 +134,7 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
     sonuc: { veri: sonuc.veri, mime: sonuc.mime, uzanti: sonuc.uzanti, onizleme: sonuc.onizleme },
     haritaGeojson,
     istatistik,
+    uyarilar,
   };
 }
 

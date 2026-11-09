@@ -133,7 +133,7 @@ function motorOlustur() {
 /**
  * @returns {{
  *   oku: (file: File) => Promise<{ geojson, uyarilar: string[], istatistik, tahminiCrs: string | null }>,
- *   donustur: (geojson, hedefUzanti: string, secenekler: { kaynakCrs: string, hedefCrs: string, zTemizle: boolean, hassasiyet: number | null }) => Promise<{ sonuc, haritaGeojson, istatistik }>,
+ *   donustur: (geojson, hedefUzanti: string, secenekler: { kaynakCrs: string, hedefCrs: string, zTemizle: boolean, hassasiyet: number | null, geometriTipi?: 'Polygon' | 'LineString' | null }) => Promise<{ sonuc, haritaGeojson, istatistik, uyarilar: string[] }>,
  *   wgs84e: (geojson, kaynakCrs: string) => Promise<object>,
  *   mesgul: boolean,
  *   ilerleme: { yuzde: number, asama: string } | null,

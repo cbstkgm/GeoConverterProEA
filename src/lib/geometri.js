@@ -204,3 +204,287 @@ export function istatistikHesapla(fc) {
     bosGeometriSayisi,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Geometri tipi dönüşümü: çizgi ↔ poligon
+// ---------------------------------------------------------------------------
+
+/** Desteklenen hedef tipler. */
+export const GEOMETRI_TIPI_HEDEFLERI = Object.freeze(['Polygon', 'LineString'])
+
+const konumKopyala = (k) => k.slice()
+const ayniXY = (a, b) => a[0] === b[0] && a[1] === b[1]
+
+/**
+ * Bir konum dizisinden kapalı halka üretir. 3'ten az farklı (x, y) konumu varsa null döner.
+ * @returns {{ halka: number[][], kapatildi: boolean } | null}
+ */
+function halkaOlustur(konumlar) {
+  if (!Array.isArray(konumlar) || konumlar.length === 0) return null
+  const farkli = new Set(konumlar.map((k) => `${k[0]},${k[1]}`))
+  if (farkli.size < 3) return null
+  const halka = konumlar.map(konumKopyala)
+  const kapatildi = !ayniXY(halka[0], halka[halka.length - 1])
+  if (kapatildi) halka.push(konumKopyala(halka[0]))
+  return { halka, kapatildi }
+}
+
+function cizgiyiPoligonaCevir(g, sayac) {
+  switch (g.type) {
+    case 'LineString': {
+      const h = halkaOlustur(g.coordinates)
+      if (!h) {
+        sayac.donusmeyen++
+        return g
+      }
+      if (h.kapatildi) sayac.kapatilan++
+      sayac.donusen++
+      return { type: 'Polygon', coordinates: [h.halka] }
+    }
+    case 'MultiLineString':
+      return multiCizgiyiPoligonaCevir(g, sayac)
+    case 'GeometryCollection':
+      return { ...g, geometries: (g.geometries || []).map((alt) => (alt ? cizgiyiPoligonaCevir(alt, sayac) : alt)) }
+    default:
+      return g
+  }
+}
+
+function poligonuCizgiyeCevir(g, sayac) {
+  const halkalar = (poligon) => (poligon || []).map((halka) => halka.map(konumKopyala))
+  switch (g.type) {
+    case 'Polygon': {
+      const h = halkalar(g.coordinates)
+      if (h.length === 0) return g
+      sayac.donusen++
+      // Deliksiz poligon tek çizgi olur; iç halkalar (delikler) kaybolmasın diye MultiLineString.
+      return h.length === 1 ? { type: 'LineString', coordinates: h[0] } : { type: 'MultiLineString', coordinates: h }
+    }
+    case 'MultiPolygon': {
+      const h = (g.coordinates || []).flatMap(halkalar)
+      if (h.length === 0) return g
+      sayac.donusen++
+      return { type: 'MultiLineString', coordinates: h }
+    }
+    case 'GeometryCollection':
+      return { ...g, geometries: (g.geometries || []).map((alt) => (alt ? poligonuCizgiyeCevir(alt, sayac) : alt)) }
+    default:
+      return g
+  }
+}
+
+// Uç noktaları eşleştirmek için anahtar: ~1e-9 birimlik yuvarlama (derecede < 1 mm, metrede 1 nm).
+const ucAnahtari = (k) => `${Math.round(k[0] * 1e9)},${Math.round(k[1] * 1e9)}`
+
+const kapaliHalkaMi = (konumlar) =>
+  Array.isArray(konumlar) &&
+  konumlar.length >= 4 &&
+  ayniXY(konumlar[0], konumlar[konumlar.length - 1]) &&
+  new Set(konumlar.map((k) => `${k[0]},${k[1]}`)).size >= 3
+
+/**
+ * Uç uca bağlanan çizgi parçalarını zincirler (ör. sınırı 2 noktalı yüzlerce segment olarak
+ * kaydedilmiş KML'ler). Parçalar gerekirse ters çevrilir. Zincir kendi başlangıcına dönünce durur;
+ * ikiden fazla parçanın buluştuğu düğümlerde ilk uygun parça seçilir.
+ * Doğrusal karmaşıklık: her uç bir kez indekslenir, her parça bir kez kullanılır.
+ * @param {{ konumlar: number[][] }[]} parcalar
+ * @returns {{ konumlar: number[][], ilk: number, parcaSayisi: number }[]}
+ */
+function parcalariZincirle(parcalar) {
+  const uclar = new Map()
+  const ucEkle = (anahtar, i) => {
+    const liste = uclar.get(anahtar)
+    if (liste) liste.push(i)
+    else uclar.set(anahtar, [i])
+  }
+  parcalar.forEach((p, i) => {
+    ucEkle(ucAnahtari(p.konumlar[0]), i)
+    ucEkle(ucAnahtari(p.konumlar[p.konumlar.length - 1]), i)
+  })
+  const kullanildi = new Array(parcalar.length).fill(false)
+  const komsuBul = (anahtar) => {
+    const liste = uclar.get(anahtar)
+    if (!liste) return -1
+    for (const j of liste) if (!kullanildi[j]) return j
+    return -1
+  }
+
+  const zincirler = []
+  for (let i = 0; i < parcalar.length; i++) {
+    if (kullanildi[i]) continue
+    kullanildi[i] = true
+    const ileri = parcalar[i].konumlar.map(konumKopyala)
+    const geriParcalar = [] // başa eklenecek parçalar (en yakını önce)
+    let parcaSayisi = 1
+    let basAnahtar = ucAnahtari(ileri[0])
+
+    // İleri yönde uzat: zincirin sonuna bağlanan parçaları ekle.
+    for (;;) {
+      const sonAnahtar = ucAnahtari(ileri[ileri.length - 1])
+      if (sonAnahtar === basAnahtar && ileri.length > 2) break // halka kapandı
+      const j = komsuBul(sonAnahtar)
+      if (j < 0) break
+      kullanildi[j] = true
+      parcaSayisi++
+      const p = parcalar[j].konumlar.map(konumKopyala)
+      if (ucAnahtari(p[0]) !== sonAnahtar) p.reverse()
+      for (let k = 1; k < p.length; k++) ileri.push(p[k])
+    }
+
+    // Kapanmadıysa geri yönde uzat: zincirin başına bağlanan parçaları ekle.
+    const kapandi = () => ucAnahtari(ileri[ileri.length - 1]) === basAnahtar
+    if (!(kapandi() && ileri.length > 2)) {
+      for (;;) {
+        const j = komsuBul(basAnahtar)
+        if (j < 0) break
+        kullanildi[j] = true
+        parcaSayisi++
+        const p = parcalar[j].konumlar.map(konumKopyala)
+        if (ucAnahtari(p[p.length - 1]) !== basAnahtar) p.reverse()
+        geriParcalar.push(p.slice(0, -1))
+        basAnahtar = ucAnahtari(p[0])
+        if (kapandi()) break
+      }
+    }
+
+    const konumlar = []
+    for (let g = geriParcalar.length - 1; g >= 0; g--) konumlar.push(...geriParcalar[g])
+    for (const k of ileri) konumlar.push(k)
+    zincirler.push({ konumlar, ilk: i, parcaSayisi })
+  }
+  return zincirler
+}
+
+/**
+ * MultiLineString → MultiPolygon: parçalar kendi içinde uç uca birleştirilir, oluşan her
+ * halka MultiPolygon'un bir üyesi olur. Poligon olamayan zincirler atlanır (sayılır).
+ * Hiç halka çıkmazsa geometri olduğu gibi döner.
+ */
+function multiCizgiyiPoligonaCevir(g, sayac) {
+  const parcalar = (g.coordinates || []).filter((p) => Array.isArray(p) && p.length > 0)
+  const poligonlar = []
+  let atlanan = 0
+  for (const z of parcalariZincirle(parcalar.map((konumlar) => ({ konumlar })))) {
+    const h = halkaOlustur(z.konumlar)
+    if (!h) {
+      atlanan += z.parcaSayisi
+      continue
+    }
+    if (h.kapatildi) sayac.kapatilan++
+    if (z.parcaSayisi > 1) {
+      sayac.birlesenParca += z.parcaSayisi
+      sayac.birlesenPoligon++
+    }
+    poligonlar.push([h.halka])
+  }
+  if (poligonlar.length === 0) {
+    sayac.donusmeyen += atlanan
+    return g
+  }
+  sayac.atlanan += atlanan
+  sayac.donusen++
+  return { type: 'MultiPolygon', coordinates: poligonlar }
+}
+
+/**
+ * Çizgi → poligon (FeatureCollection düzeyinde).
+ * - MultiLineString objesi kendi parçalarıyla MultiPolygon olur (obje korunur).
+ * - LineString objeleri: kapalı olan kendi objesinde Polygon olur. Açık olanlar obje obje
+ *   dağılmış olsa da uç uca birleştirilir (ör. sınırı 2 noktalı segmentlerle kaydedilmiş KML);
+ *   oluşan her zincir bir Polygon objesi olur ve zincirin ilk parçasının özelliklerini taşır.
+ */
+function cizgileriPoligonlastir(fc, sayac) {
+  const havuz = [] // { konumlar, sira } — objeler arası birleştirilecek açık LineString'ler
+  const cikti = fc.features.map(() => [])
+
+  fc.features.forEach((f, sira) => {
+    const g = f && f.geometry
+    if (g && g.type === 'LineString') {
+      if (kapaliHalkaMi(g.coordinates)) {
+        sayac.donusen++
+        cikti[sira].push({ ...f, geometry: { type: 'Polygon', coordinates: [g.coordinates.map(konumKopyala)] } })
+      } else if (Array.isArray(g.coordinates) && g.coordinates.length > 0) {
+        havuz.push({ konumlar: g.coordinates, sira })
+      } else {
+        cikti[sira].push(f)
+      }
+      return
+    }
+    if (g && (g.type === 'MultiLineString' || g.type === 'GeometryCollection')) {
+      const yeni = g.type === 'MultiLineString' ? multiCizgiyiPoligonaCevir(g, sayac) : cizgiyiPoligonaCevir(g, sayac)
+      cikti[sira].push(yeni === g ? f : { ...f, geometry: yeni })
+      return
+    }
+    cikti[sira].push(f)
+  })
+
+  for (const z of parcalariZincirle(havuz)) {
+    const sira = havuz[z.ilk].sira
+    const kaynak = fc.features[sira]
+    const h = halkaOlustur(z.konumlar)
+    if (!h) {
+      sayac.donusmeyen += z.parcaSayisi
+      cikti[sira].push({ ...kaynak, geometry: { type: 'LineString', coordinates: z.konumlar } })
+      continue
+    }
+    if (h.kapatildi) sayac.kapatilan++
+    if (z.parcaSayisi > 1) {
+      sayac.birlesenParca += z.parcaSayisi
+      sayac.birlesenPoligon++
+    }
+    sayac.donusen++
+    cikti[sira].push({ ...kaynak, geometry: { type: 'Polygon', coordinates: [h.halka] } })
+  }
+
+  return cikti.flat()
+}
+
+/**
+ * Çizgileri poligona (hedef 'Polygon') veya poligonları çizgiye (hedef 'LineString') çevirir.
+ * - LineString → Polygon, MultiLineString → MultiPolygon. Uç uca bağlanan parçalar (aynı ya da
+ *   farklı objelerde) önce birleştirilir; açık kalan zincir ilk noktayla kapatılır.
+ *   3'ten az farklı noktası olan çizgi poligon olamaz; olduğu gibi bırakılır ve uyarılır.
+ * - Polygon → LineString (delikliyse tüm halkalarıyla MultiLineString), MultiPolygon → MultiLineString.
+ * - Nokta geometrileri ve hedefle ilgisi olmayan tipler değişmez. Özelliklere dokunulmaz.
+ * @returns {{ geojson: object, uyarilar: string[], donusenSayisi: number }}
+ */
+export function geometriTipiDonustur(fc, hedef) {
+  fcDogrula(fc)
+  if (!GEOMETRI_TIPI_HEDEFLERI.includes(hedef)) {
+    throw new Error(`Desteklenmeyen hedef geometri tipi: "${hedef}". 'Polygon' veya 'LineString' olmalıdır.`)
+  }
+  const sayac = { donusen: 0, donusmeyen: 0, atlanan: 0, kapatilan: 0, birlesenParca: 0, birlesenPoligon: 0 }
+  const features =
+    hedef === 'Polygon'
+      ? cizgileriPoligonlastir(fc, sayac)
+      : fc.features.map((f) => {
+          if (!f || !f.geometry) return f
+          const yeni = poligonuCizgiyeCevir(f.geometry, sayac)
+          if (yeni === f.geometry) return f
+          const { bbox: _bbox, ...geometri } = yeni
+          return { ...f, geometry: geometri }
+        })
+
+  const uyarilar = []
+  const hedefAd = hedef === 'Polygon' ? 'poligona' : 'çizgiye'
+  if (sayac.donusen === 0) {
+    uyarilar.push(`Veride ${hedefAd} çevrilebilecek geometri bulunamadı; geometriler değiştirilmedi.`)
+  }
+  if (sayac.birlesenParca > 0) {
+    uyarilar.push(
+      `Uç uca bağlanan ${sayac.birlesenParca} çizgi parçası birleştirilerek ${sayac.birlesenPoligon} poligon oluşturuldu (özellikler her zincirin ilk parçasından alındı).`,
+    )
+  }
+  if (sayac.kapatilan > 0) {
+    uyarilar.push(`${sayac.kapatilan} açık çizgi, ilk noktasına bağlanarak kapatıldı ve poligona çevrildi.`)
+  }
+  if (sayac.atlanan > 0) {
+    uyarilar.push(`MultiLineString objelerindeki ${sayac.atlanan} parça 3'ten az farklı noktaya sahip olduğu için MultiPolygon'a alınmadı.`)
+  }
+  if (sayac.donusmeyen > 0) {
+    uyarilar.push(`${sayac.donusmeyen} çizgi 3'ten az farklı noktaya sahip olduğu için poligona çevrilemedi ve olduğu gibi bırakıldı.`)
+  }
+
+  const { bbox: _fcBbox, ...ust } = fc
+  return { geojson: { ...ust, features }, uyarilar, donusenSayisi: sayac.donusen }
+}

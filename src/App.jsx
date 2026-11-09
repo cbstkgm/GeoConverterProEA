@@ -48,6 +48,7 @@ function App() {
   const hedefCrs = hedefCrsKilitli ? WGS84 : secilenHedefCrs;
   const [zTemizle, setZTemizle] = useState(false);
   const [hassasiyet, setHassasiyet] = useState(null);
+  const [geometriTipi, setGeometriTipi] = useState(null);
 
   const [bildirim, setBildirim] = useState(null);
   const istekNo = useRef(0);
@@ -110,7 +111,7 @@ function App() {
     if (!kaynak) return;
     const no = ++istekNo.current;
     try {
-      const yeni = await donustur(kaynak.geojson, hedefFormat, { kaynakCrs, hedefCrs, zTemizle, hassasiyet });
+      const yeni = await donustur(kaynak.geojson, hedefFormat, { kaynakCrs, hedefCrs, zTemizle, hassasiyet, geometriTipi });
       if (no !== istekNo.current) return;
       setSonuc(yeni);
       bildir('basari', `Dönüştürüldü: '${dosya.name}' → ${yeni.sonuc.uzanti} (${hedefCrs}).`);
@@ -179,6 +180,8 @@ function App() {
           zTemizle={zTemizle}
           onZTemizle={setZTemizle}
           hassasiyet={hassasiyet}
+          geometriTipi={geometriTipi}
+          onGeometriTipi={setGeometriTipi}
           onHassasiyet={setHassasiyet}
           onBaslat={donusumuBaslat}
           baslatilabilir={Boolean(kaynak && hedefFormat)}
@@ -197,7 +200,7 @@ function App() {
             )}
           </div>
 
-          <IstatistikKarti baslik="Sonuç istatistikleri" istatistik={sonuc?.istatistik} />
+          <IstatistikKarti baslik="Sonuç istatistikleri" istatistik={sonuc?.istatistik} uyarilar={sonuc?.uyarilar} />
 
           <MetinOnizleme
             id="sonuc-metin"

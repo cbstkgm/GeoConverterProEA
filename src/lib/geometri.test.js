@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { zDegerleriniKaldir, hassasiyetUygula, istatistikHesapla } from './geometri.js'
+import { zDegerleriniKaldir, hassasiyetUygula, istatistikHesapla, geometriTipiDonustur } from './geometri.js'
 
 const fcOlustur = (...geometriler) => ({
   type: 'FeatureCollection',
@@ -189,5 +189,149 @@ describe('istatistikHesapla', () => {
     const i = istatistikHesapla(fcOlustur({ type: 'MultiPoint', coordinates: [[-10, -5], [20, 15]] }))
     expect(i.bbox).toEqual([-10, -5, 20, 15])
     expect(i.zIceriyor).toBe(false)
+  })
+})
+
+describe('geometriTipiDonustur', () => {
+  it('açık LineString kapatılarak Polygon olur, özellikler ve Z korunur', () => {
+    const fc = fcOlustur({ type: 'LineString', coordinates: [[0, 0, 5], [10, 0, 5], [10, 10, 5]] })
+    const { geojson, uyarilar, donusenSayisi } = geometriTipiDonustur(fc, 'Polygon')
+    expect(donusenSayisi).toBe(1)
+    expect(geojson.features[0].geometry).toEqual({
+      type: 'Polygon',
+      coordinates: [[[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 0, 5]]],
+    })
+    expect(geojson.features[0].properties).toEqual({ sira: 0 })
+    expect(uyarilar.join(' ')).toMatch(/1 açık çizgi/)
+  })
+
+  it('zaten kapalı LineString ikinci kez kapatılmaz', () => {
+    const halka = [[0, 0], [1, 0], [1, 1], [0, 0]]
+    const { geojson, uyarilar } = geometriTipiDonustur(fcOlustur({ type: 'LineString', coordinates: halka }), 'Polygon')
+    expect(geojson.features[0].geometry.coordinates).toEqual([halka])
+    expect(uyarilar).toEqual([])
+  })
+
+  it("3'ten az farklı noktalı çizgi değişmeden kalır ve uyarılır", () => {
+    const cizgi = { type: 'LineString', coordinates: [[0, 0], [1, 1], [0, 0]] }
+    const { geojson, uyarilar } = geometriTipiDonustur(fcOlustur(cizgi), 'Polygon')
+    expect(geojson.features[0].geometry).toEqual(cizgi)
+    expect(uyarilar.join(' ')).toMatch(/1 çizgi 3'ten az/)
+  })
+
+  it('MultiLineString → MultiPolygon; geçersiz parça atlanır', () => {
+    const fc = fcOlustur({
+      type: 'MultiLineString',
+      coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]], [[5, 5], [6, 6]]],
+    })
+    const { geojson, uyarilar } = geometriTipiDonustur(fc, 'Polygon')
+    expect(geojson.features[0].geometry).toEqual({ type: 'MultiPolygon', coordinates: [[[[0, 0], [1, 0], [1, 1], [0, 0]]]] })
+    expect(uyarilar.join(' ')).toMatch(/1 parça 3'ten az/)
+  })
+
+  it('Polygon → LineString; delikli poligon tüm halkalarıyla MultiLineString olur', () => {
+    const dis = [[0, 0], [10, 0], [10, 10], [0, 0]]
+    const ic = [[2, 2], [3, 2], [3, 3], [2, 2]]
+    const { geojson } = geometriTipiDonustur(
+      fcOlustur({ type: 'Polygon', coordinates: [dis] }, { type: 'Polygon', coordinates: [dis, ic] }),
+      'LineString',
+    )
+    expect(geojson.features[0].geometry).toEqual({ type: 'LineString', coordinates: dis })
+    expect(geojson.features[1].geometry).toEqual({ type: 'MultiLineString', coordinates: [dis, ic] })
+  })
+
+  it('MultiPolygon → MultiLineString; nokta, null ve GeometryCollection içi doğru işlenir', () => {
+    const a = [[0, 0], [1, 0], [1, 1], [0, 0]]
+    const b = [[5, 5], [6, 5], [6, 6], [5, 5]]
+    const fc = fcOlustur(
+      { type: 'MultiPolygon', coordinates: [[a], [b]] },
+      { type: 'Point', coordinates: [1, 2] },
+      null,
+      { type: 'GeometryCollection', geometries: [{ type: 'Polygon', coordinates: [a] }, { type: 'Point', coordinates: [0, 0] }] },
+    )
+    const { geojson } = geometriTipiDonustur(fc, 'LineString')
+    expect(geojson.features[0].geometry).toEqual({ type: 'MultiLineString', coordinates: [a, b] })
+    expect(geojson.features[1].geometry).toEqual({ type: 'Point', coordinates: [1, 2] })
+    expect(geojson.features[2].geometry).toBeNull()
+    expect(geojson.features[3].geometry.geometries[0]).toEqual({ type: 'LineString', coordinates: a })
+  })
+
+  it('gidiş-dönüş: Polygon → LineString → Polygon aynı geometriyi verir', () => {
+    const poligon = { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]] }
+    const cizgi = geometriTipiDonustur(fcOlustur(poligon), 'LineString').geojson
+    const geri = geometriTipiDonustur(cizgi, 'Polygon').geojson
+    expect(geri.features[0].geometry).toEqual(poligon)
+  })
+
+  it('girdiyi değiştirmez; çevrilecek geometri yoksa uyarır; geçersiz hedefte hata verir', () => {
+    const fc = fcOlustur({ type: 'LineString', coordinates: [[0, 0], [1, 0], [1, 1]] })
+    const kopya = JSON.parse(JSON.stringify(fc))
+    geometriTipiDonustur(fc, 'Polygon')
+    expect(fc).toEqual(kopya)
+    expect(geometriTipiDonustur(fc, 'LineString').uyarilar.join(' ')).toMatch(/bulunamadı/)
+    expect(() => geometriTipiDonustur(fc, 'Point')).toThrow(/Desteklenmeyen hedef geometri tipi/)
+  })
+
+  it('2 noktalı segmentlere bölünmüş sınır (ayrı LineString objeleri) birleşip tek Polygon olur', () => {
+    // Kare sınır 4 ayrı segment; ikisi ters yönde ve sıra karışık. Ayrıca alakasız bir nokta.
+    const fc = fcOlustur(
+      { type: 'LineString', coordinates: [[0, 0], [10, 0]] },
+      { type: 'LineString', coordinates: [[10, 10], [0, 10]] },
+      { type: 'Point', coordinates: [5, 5] },
+      { type: 'LineString', coordinates: [[10, 10], [10, 0]] }, // ters yönde
+      { type: 'LineString', coordinates: [[0, 0], [0, 10]] }, // ters yönde
+    )
+    const { geojson, uyarilar } = geometriTipiDonustur(fc, 'Polygon')
+    const poligonlar = geojson.features.filter((f) => f.geometry.type === 'Polygon')
+    expect(poligonlar).toHaveLength(1)
+    const halka = poligonlar[0].geometry.coordinates[0]
+    expect(halka).toHaveLength(5)
+    expect(halka[0]).toEqual(halka[4])
+    expect(new Set(halka.map(String))).toEqual(new Set(['0,0', '10,0', '10,10', '0,10']))
+    expect(poligonlar[0].properties).toEqual({ sira: 0 })
+    expect(geojson.features.filter((f) => f.geometry.type === 'Point')).toHaveLength(1)
+    expect(geojson.features).toHaveLength(2)
+    expect(uyarilar.join(' ')).toMatch(/4 çizgi parçası birleştirilerek 1 poligon/)
+  })
+
+  it('segmentli MultiLineString aynı objede MultiPolygon olur (iki ayrı halka)', () => {
+    const fc = fcOlustur({
+      type: 'MultiLineString',
+      coordinates: [
+        [[0, 0], [1, 0]], [[1, 0], [1, 1]], [[1, 1], [0, 0]], // 1. halka (3 segment)
+        [[5, 5], [6, 5]], [[6, 6], [6, 5]], [[6, 6], [5, 5]], // 2. halka (biri ters)
+      ],
+    })
+    const { geojson } = geometriTipiDonustur(fc, 'Polygon')
+    expect(geojson.features).toHaveLength(1)
+    const g = geojson.features[0].geometry
+    expect(g.type).toBe('MultiPolygon')
+    expect(g.coordinates).toHaveLength(2)
+    for (const [halka] of g.coordinates) {
+      expect(halka).toHaveLength(4)
+      expect(halka[0]).toEqual(halka[3])
+    }
+  })
+
+  it('birbirine bağlanmayan iki açık çizgi ayrı poligonlar olarak kapatılır', () => {
+    const fc = fcOlustur(
+      { type: 'LineString', coordinates: [[0, 0], [1, 0], [1, 1]] },
+      { type: 'LineString', coordinates: [[5, 5], [6, 5], [6, 6]] },
+    )
+    const { geojson, uyarilar } = geometriTipiDonustur(fc, 'Polygon')
+    expect(geojson.features.map((f) => f.geometry.type)).toEqual(['Polygon', 'Polygon'])
+    expect(uyarilar.join(' ')).toMatch(/2 açık çizgi/)
+  })
+
+  it('binlerce segmentli halka doğrusal sürede birleşir', () => {
+    const n = 20000
+    const nokta = (i) => [Math.cos((2 * Math.PI * i) / n), Math.sin((2 * Math.PI * i) / n)]
+    const segmentler = Array.from({ length: n }, (_, i) => ({ type: 'LineString', coordinates: [nokta(i), nokta((i + 1) % n)] }))
+    segmentler.reverse()
+    const t0 = Date.now()
+    const { geojson } = geometriTipiDonustur(fcOlustur(...segmentler), 'Polygon')
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect(geojson.features).toHaveLength(1)
+    expect(geojson.features[0].geometry.coordinates[0]).toHaveLength(n + 1)
   })
 })

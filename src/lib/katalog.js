@@ -81,3 +81,10 @@ export const KOORDINAT_SISTEMI_TANIMLARI = Object.freeze(sistemler.map((s) => Ob
 export const KOORDINAT_SISTEMLERI = Object.freeze(
   sistemler.map(({ kod, ad }) => Object.freeze({ kod, ad })),
 );
+
+/** Dönüşüm panelindeki geometri tipi seçenekleri (değer null: değiştirme). */
+export const GEOMETRI_TIPI_SECENEKLERI = Object.freeze([
+  Object.freeze({ deger: null, ad: 'Değiştirme' }),
+  Object.freeze({ deger: 'Polygon', ad: 'Çizgi → Poligon (LineString → Polygon)' }),
+  Object.freeze({ deger: 'LineString', ad: 'Poligon → Çizgi (Polygon → LineString)' }),
+]);

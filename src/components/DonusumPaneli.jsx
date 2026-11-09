@@ -1,4 +1,4 @@
-import { KOORDINAT_SISTEMLERI } from '../lib/katalog';
+import { KOORDINAT_SISTEMLERI, GEOMETRI_TIPI_SECENEKLERI } from '../lib/katalog';
 import { TARAYICI_FORMATLARI, PLANLANAN_GRUPLAR } from './formatSecenekleri';
 
 const HASSASIYETLER = [2, 3, 4, 5, 6, 7, 8];
@@ -41,6 +41,8 @@ export default function DonusumPaneli({
   onZTemizle,
   hassasiyet,
   onHassasiyet,
+  geometriTipi,
+  onGeometriTipi,
   onBaslat,
   baslatilabilir,
   mesgul,
@@ -109,6 +111,22 @@ export default function DonusumPaneli({
           {HASSASIYETLER.map((b) => (
             <option key={b} value={b}>
               {b} ondalık basamak
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="form-grubu">
+        <label htmlFor="geometri-tipi">Geometri tipi</label>
+        <select
+          id="geometri-tipi"
+          value={geometriTipi ?? ''}
+          onChange={(e) => onGeometriTipi(e.target.value === '' ? null : e.target.value)}
+          disabled={mesgul}
+        >
+          {GEOMETRI_TIPI_SECENEKLERI.map((s) => (
+            <option key={s.deger ?? 'yok'} value={s.deger ?? ''}>
+              {s.ad}
             </option>
           ))}
         </select>
