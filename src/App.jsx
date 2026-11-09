@@ -46,7 +46,8 @@ function App() {
   // KML/KMZ yalnızca WGS84 taşıyabilir: bu formatlarda kullanıcının seçimi korunur ama uygulanmaz.
   const hedefCrsKilitli = wgs84ZorunluMu(hedefFormat);
   const hedefCrs = hedefCrsKilitli ? WGS84 : secilenHedefCrs;
-  const [zTemizle, setZTemizle] = useState(false);
+  // Varsayılan: Z (yükseklik) değerleri olmadan, 2B çıktı.
+  const [zTemizle, setZTemizle] = useState(true);
   const [hassasiyet, setHassasiyet] = useState(null);
   const [geometriTipi, setGeometriTipi] = useState(null);
 
@@ -158,7 +159,12 @@ function App() {
             )}
           </div>
 
-          <IstatistikKarti baslik="Kaynak istatistikleri" istatistik={kaynak?.istatistik} uyarilar={kaynak?.uyarilar} />
+          <IstatistikKarti
+            baslik="Kaynak istatistikleri"
+            istatistik={kaynak?.istatistik}
+            uyarilar={kaynak?.uyarilar}
+            gecerlilik={kaynak?.gecerlilik}
+          />
 
           <MetinOnizleme
             id="kaynak-metin"
@@ -194,13 +200,23 @@ function App() {
 
           <div className="harita-alani harita-sonuc">
             {sonuc?.haritaGeojson ? (
-              <Harita veri={sonuc.haritaGeojson} renk={SONUC_RENK} etiket="Sonuç veri haritası" />
+              <Harita
+                veri={sonuc.haritaGeojson}
+                renk={SONUC_RENK}
+                etiket="Sonuç veri haritası"
+                sorunlar={sonuc.gecerlilik?.sorunlar}
+              />
             ) : (
               <div className="harita-bos">Harita (Sonuç)</div>
             )}
           </div>
 
-          <IstatistikKarti baslik="Sonuç istatistikleri" istatistik={sonuc?.istatistik} uyarilar={sonuc?.uyarilar} />
+          <IstatistikKarti
+            baslik="Sonuç istatistikleri"
+            istatistik={sonuc?.istatistik}
+            uyarilar={sonuc?.uyarilar}
+            gecerlilik={sonuc?.gecerlilik}
+          />
 
           <MetinOnizleme
             id="sonuc-metin"

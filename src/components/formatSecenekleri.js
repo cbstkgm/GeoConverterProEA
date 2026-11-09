@@ -11,4 +11,4 @@ export const PLANLANAN_GRUPLAR = desteklenen_formatlar
   .filter((g) => g.formatlar.length > 0);
 
 export const VARSAYILAN_HEDEF =
-  TARAYICI_FORMATLARI.find((f) => f.uzanti === '.geojson')?.uzanti ?? TARAYICI_FORMATLARI[0]?.uzanti ?? '';
+  TARAYICI_FORMATLARI.find((f) => f.uzanti === '.wkt')?.uzanti ?? TARAYICI_FORMATLARI[0]?.uzanti ?? '';

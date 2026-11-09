@@ -1,7 +1,32 @@
 const sayi = (n) => (typeof n === 'number' ? n.toLocaleString('tr-TR') : '—');
 const koord = (n) => (Number.isFinite(n) ? Number(n.toFixed(6)).toString() : '?');
 
-export default function IstatistikKarti({ baslik, istatistik, uyarilar }) {
+function GecerlilikOzeti({ gecerlilik }) {
+  const { denetlenen, gecerli, gecersiz, sorunlar, kesildi } = gecerlilik;
+  if (denetlenen === 0) return null;
+  return (
+    <div className={`gecerlilik ${gecersiz > 0 ? 'gecerlilik-hatali' : 'gecerlilik-tamam'}`} role={gecersiz > 0 ? 'alert' : undefined}>
+      <p className="gecerlilik-ozet">
+        {gecersiz === 0
+          ? `✅ Geometriler geçerli (${sayi(gecerli)} / ${sayi(denetlenen)})`
+          : `❌ ${sayi(gecersiz)} geçersiz geometri (${sayi(denetlenen)} geometriden)`}
+      </p>
+      {sorunlar.length > 0 && (
+        <ul className="gecerlilik-listesi" aria-label="Geçersiz geometriler">
+          {sorunlar.map((s, i) => (
+            <li key={i}>
+              <strong>Obje {sayi(s.obje)}</strong> ({s.tip}): {s.neden}
+              {s.konum && <span className="gecerlilik-konum"> — {s.konum.map(koord).join(', ')}</span>}
+            </li>
+          ))}
+          {kesildi && <li>… ve diğerleri (ilk {sorunlar.length} sorun gösteriliyor)</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export default function IstatistikKarti({ baslik, istatistik, uyarilar, gecerlilik }) {
   if (!istatistik && !uyarilar?.length) return null;
 
   const tipler = istatistik ? Object.entries(istatistik.geometriTipleri || {}) : [];
@@ -40,6 +65,7 @@ export default function IstatistikKarti({ baslik, istatistik, uyarilar }) {
           </div>
         </dl>
       )}
+      {gecerlilik && <GecerlilikOzeti gecerlilik={gecerlilik} />}
       {uyarilar?.length > 0 && (
         <ul className="uyari-listesi" aria-label="Uyarılar">
           {uyarilar.map((u, i) => (

@@ -8,6 +8,7 @@ import { dosyaYaz } from '../lib/yazicilar.js';
 import { zDegerleriniKaldir, hassasiyetUygula, istatistikHesapla, geometriTipiDonustur } from '../lib/geometri.js';
 import { koordinatDonustur, wgs84OlabilirMi } from '../lib/projeksiyon.js';
 import { WGS84, wgs84ZorunluMu } from '../lib/katalog.js';
+import { gecerlilikDenetle } from '../lib/gecerlilik.js';
 
 export { WGS84 };
 
@@ -30,6 +31,29 @@ function featureCollectionDogrula(geojson, baglam) {
 function crsDogrula(kod, alan) {
   if (typeof kod !== 'string' || kod.trim() === '') {
     throw new Error(`Koordinat sistemi belirtilmedi (${alan}).`);
+  }
+}
+
+/**
+ * Geçerlilik sorunlarının konumlarını (crs'de) haritada göstermek için EPSG:4326'ya çevirir
+ * ve her soruna `haritaKonum` ekler. Dönüşüm yapılamazsa sorunlar haritasız kalır.
+ */
+function sorunlariHaritayaTasi(gecerlilik, crs) {
+  const konumlu = gecerlilik.sorunlar.filter((s) => s.konum);
+  if (konumlu.length === 0) return gecerlilik;
+  try {
+    let noktalar = {
+      type: 'FeatureCollection',
+      features: konumlu.map((s) => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: s.konum } })),
+    };
+    if (crs.trim().toUpperCase() !== WGS84) noktalar = koordinatDonustur(noktalar, crs, WGS84);
+    let k = 0;
+    return {
+      ...gecerlilik,
+      sorunlar: gecerlilik.sorunlar.map((s) => (s.konum ? { ...s, haritaKonum: noktalar.features[k++].geometry.coordinates } : s)),
+    };
+  } catch {
+    return gecerlilik;
   }
 }
 
@@ -63,16 +87,20 @@ export async function oku(girdi, ilerle) {
   await bildir(ilerle, 70, 'İstatistikler hesaplanıyor');
   const istatistik = istatistikHesapla(geojson);
 
-  await bildir(ilerle, 85, 'Koordinat sistemi tahmin ediliyor');
+  await bildir(ilerle, 80, 'Geometri geçerliliği denetleniyor');
+  const gecerlilik = gecerlilikDenetle(geojson);
+
+  await bildir(ilerle, 90, 'Koordinat sistemi tahmin ediliyor');
   const tahminiCrs = istatistik.koordinatSayisi > 0 && wgs84OlabilirMi(geojson) ? WGS84 : null;
 
   await bildir(ilerle, 100, 'Tamamlandı');
-  return { geojson, uyarilar: Array.isArray(uyarilar) ? uyarilar : [], istatistik, tahminiCrs };
+  return { geojson, uyarilar: Array.isArray(uyarilar) ? uyarilar : [], istatistik, gecerlilik, tahminiCrs };
 }
 
 /**
  * Sözleşmedeki sıra: koordinatDonustur → (geometriTipi) geometriTipiDonustur → (zTemizle) zDegerleriniKaldir →
- * (hassasiyet) hassasiyetUygula → dosyaYaz. Ardından harita için EPSG:4326 kopyası.
+ * (hassasiyet) hassasiyetUygula → dosyaYaz. Ardından harita için EPSG:4326 kopyası ve
+ * yazılan geometrinin geçerlilik denetimi (gecerlilik; sorun konumları haritaKonum ile WGS84'te).
  * @param {object} geojson FeatureCollection
  * @param {string} hedefUzanti örn. '.wkt'
  * @param {{ kaynakCrs: string, hedefCrs: string, zTemizle?: boolean, hassasiyet?: number | null, geometriTipi?: 'Polygon' | 'LineString' | null }} secenekler
@@ -126,14 +154,19 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
   await bildir(ilerle, 80, 'Harita önizlemesi hazırlanıyor');
   const haritaGeojson = hedefCrs === WGS84 ? fc : koordinatDonustur(fc, hedefCrs, WGS84);
 
-  await bildir(ilerle, 92, 'İstatistikler hesaplanıyor');
+  await bildir(ilerle, 88, 'İstatistikler hesaplanıyor');
   const istatistik = istatistikHesapla(fc);
+
+  // Yazılan (son) geometri denetlenir: hassasiyet yuvarlaması veya tip dönüşümü de geçersizlik üretebilir.
+  await bildir(ilerle, 94, 'Geometri geçerliliği denetleniyor');
+  const gecerlilik = sorunlariHaritayaTasi(gecerlilikDenetle(fc), hedefCrs);
 
   await bildir(ilerle, 100, 'Tamamlandı');
   return {
     sonuc: { veri: sonuc.veri, mime: sonuc.mime, uzanti: sonuc.uzanti, onizleme: sonuc.onizleme },
     haritaGeojson,
     istatistik,
+    gecerlilik,
     uyarilar,
   };
 }

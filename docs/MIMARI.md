@@ -25,6 +25,8 @@ Bu belge, modüller arasındaki **bağlayıcı arayüzleri** tanımlar. Her mod�
 
 `src/lib/katalog.js` (baş mühendis): **bağımlılıksız** sabitler — `DESTEKLENEN_GIRDILER`, `DESTEKLENEN_CIKTILAR`, `KOORDINAT_SISTEMLERI`, `WGS84`, `wgs84ZorunluMu`. Arayüz bu sabitleri yalnızca buradan import eder; böylece okuyucu/yazıcı/projeksiyon kütüphaneleri ana pakete girmez, yalnızca Worker paketinde kalır. `okuyucular.js`, `yazicilar.js` ve `projeksiyon.js` aynı sabitleri yeniden dışa aktarır.
 
+**Geçerlilik denetimi:** `src/lib/gecerlilik.js` → `gecerlilikDenetle(fc)` OGC Simple Features kurallarını (kapalı halka, kendini kesme/değme, diken, delik konumu, MultiPolygon örtüşmesi, sonlu koordinat) harici kütüphane olmadan denetler. `oku` ve `donustur` sonucuna `gecerlilik: { denetlenen, gecerli, gecersiz, bos, sorunlar[], kesildi }` eklenir. `donustur`'da denetim **yazılan** geometri üzerinde yapılır (hassasiyet yuvarlaması da geçersizlik üretebilir); sorunlara haritada gösterim için WGS84 `haritaKonum` eklenir.
+
 **KML/KMZ kuralı:** KML 2.2 yalnızca WGS84 taşır. Arayüz bu formatlarda hedef CRS'yi EPSG:4326'ya kilitler; `islemci.donustur` başka bir hedef CRS'yi hata ile reddeder.
 
 Bağımlılıklar baş mühendis tarafından kurulmuştur: `proj4`, `shpjs`, `@xmldom/xmldom`, `vitest`. **Kimse `npm install` çalıştırmaz.**

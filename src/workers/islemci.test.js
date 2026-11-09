@@ -143,6 +143,39 @@ describe('islemci — donustur', () => {
     expect(metneCevir(geri.sonuc.veri).trim()).toBe('LINESTRING (30 40, 31 40, 31 41, 30 40)');
   });
 
+  it('geçerlilik: yazılan geometri denetlenir; sorun konumu haritaya WGS84 olarak taşınır', async () => {
+    // İnce bir poligon: hassasiyet 0 basamağa yuvarlanınca tüm noktaları doğrusal (sıfır alanlı) olur.
+    const ince = {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[33, 39.9], [33.0001, 39.9], [33.0001, 39.9001], [33, 39.9]]] } }],
+    };
+    const temiz = await donustur(ince, '.wkt', { kaynakCrs: 'EPSG:4326', hedefCrs: 'EPSG:4326' });
+    expect(temiz.gecerlilik).toMatchObject({ denetlenen: 1, gecerli: 1, gecersiz: 0 });
+
+    // 3 basamağa yuvarlanınca köşeler çakışır: hassasiyet de geçersiz geometri üretebilir.
+    const bozuk = await donustur(ince, '.wkt', { kaynakCrs: 'EPSG:4326', hedefCrs: 'EPSG:4326', hassasiyet: 3 });
+    expect(bozuk.gecerlilik.gecersiz).toBe(1);
+    expect(bozuk.gecerlilik.sorunlar[0].neden).toMatch(/farklı noktadan/);
+
+    // Projeksiyonlu hedefte sorun konumu metre cinsinden, harita konumu WGS84'te verilir.
+    const papyon = {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[33, 39.9], [33.01, 39.91], [33.01, 39.9], [33, 39.91], [33, 39.9]]] } }],
+    };
+    const tm = await donustur(papyon, '.wkt', { kaynakCrs: 'EPSG:4326', hedefCrs: 'EPSG:5255' });
+    const [sorun] = tm.gecerlilik.sorunlar;
+    expect(sorun.neden).toMatch(/kendisiyle kesişiyor/);
+    expect(sorun.konum[0]).toBeGreaterThan(400000); // TM33 doğu (metre)
+    expect(sorun.haritaKonum[0]).toBeCloseTo(33.005, 3); // WGS84 boylam
+    expect(sorun.haritaKonum[1]).toBeCloseTo(39.905, 3);
+  });
+
+  it('oku geçerlilik özetini de döndürür', async () => {
+    const papyon = { type: 'Polygon', coordinates: [[[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]] };
+    const { gecerlilik } = await oku({ ad: 'p.geojson', veri: kodla(JSON.stringify(papyon)) });
+    expect(gecerlilik).toMatchObject({ denetlenen: 1, gecersiz: 1 });
+  });
+
   it('KML/KMZ çıktısında WGS84 dışı hedef koordinat sistemini reddeder', async () => {
     for (const uzanti of ['.kml', '.KMZ']) {
       await expect(

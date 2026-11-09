@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, LayersControl, GeoJSON, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, LayersControl, GeoJSON, CircleMarker, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 
 const { BaseLayer } = LayersControl;
@@ -88,7 +88,9 @@ function SinirlaraSigdir({ veri }) {
   return null;
 }
 
-function Harita({ veri, renk, etiket }) {
+const SORUN_STILI = { color: '#ffffff', weight: 2, fillColor: '#ff3b30', fillOpacity: 1 };
+
+function Harita({ veri, renk, etiket, sorunlar }) {
   const secenekler = useMemo(
     () => ({
       stil: { color: renk, weight: 2, fillColor: renk, fillOpacity: 0.3 },
@@ -126,6 +128,18 @@ function Harita({ veri, renk, etiket }) {
           onEachFeature={her_obje}
         />
       )}
+      {sorunlar
+        ?.filter((s) => s.haritaKonum)
+        .map((s, i) => (
+          <CircleMarker
+            key={`${s.obje}-${i}`}
+            center={[s.haritaKonum[1], s.haritaKonum[0]]}
+            radius={7}
+            pathOptions={SORUN_STILI}
+          >
+            <Tooltip>{`Obje ${s.obje} (${s.tip}): ${s.neden}`}</Tooltip>
+          </CircleMarker>
+        ))}
       <SinirlaraSigdir veri={veri} />
     </MapContainer>
   );
