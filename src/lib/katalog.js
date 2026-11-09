@@ -25,6 +25,14 @@ export const DESTEKLENEN_CIKTILAR = [
   { uzanti: '.kmz', aciklama: 'KMZ (sıkıştırılmış KML)', mime: 'application/vnd.google-earth.kmz' },
   { uzanti: '.csv', aciklama: 'CSV (WKT sütunlu, UTF-8 BOM)', mime: 'text/csv' },
   { uzanti: '.gml', aciklama: 'GML (Netcad / TKGM uyumlu)', mime: 'application/gml+xml' },
+  { uzanti: '.dxf', aciklama: 'DXF (AutoCAD R12, Netcad uyumlu)', mime: 'image/vnd.dxf' },
+  { uzanti: '.zip', aciklama: 'ESRI Shapefile (zipli; shp/shx/dbf/prj/cpg)', mime: 'application/zip' },
+  { uzanti: '.gpkg', aciklama: 'OGC GeoPackage 1.3 (SQLite)', mime: 'application/geopackage+sqlite3' },
+  { uzanti: '.wkb', aciklama: 'Well-Known Binary (satır başına bir hex WKB)', mime: 'text/plain' },
+  { uzanti: '.sql', aciklama: 'PostGIS SQL betiği (CREATE TABLE + INSERT)', mime: 'application/sql' },
+  { uzanti: '.xyz', aciklama: 'XYZ nokta bulutu (köşe noktaları)', mime: 'text/plain' },
+  { uzanti: '.html', aciklama: 'HTML harita (Leaflet, tek dosya)', mime: 'text/html' },
+  { uzanti: '.md', aciklama: 'Markdown öznitelik tablosu', mime: 'text/markdown' },
 ];
 
 /** KML 2.2 standardı koordinatları yalnızca WGS84 boylam/enlem olarak tanımlar. */

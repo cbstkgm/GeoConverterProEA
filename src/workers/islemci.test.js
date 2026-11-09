@@ -288,6 +288,38 @@ describe('islemci — donustur', () => {
   });
 });
 
+describe('islemci — yeni çıktı formatları (hedef CRS yazıcıya ulaşır)', () => {
+  const tm33 = { kaynakCrs: 'EPSG:4326', hedefCrs: 'EPSG:5255' };
+
+  it('her yeni format ITRF96 TM33 hedefiyle yazılır', async () => {
+    for (const uzanti of ['.dxf', '.zip', '.gpkg', '.wkb', '.sql', '.xyz', '.html', '.md']) {
+      const { sonuc } = await donustur(ornekFc(), uzanti, tm33);
+      expect(sonuc.uzanti).toBe(uzanti);
+      expect(sonuc.veri.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('Shapefile .prj ve SQL SRID hedef CRS\'ten gelir', async () => {
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync((await donustur(ornekFc(), '.zip', tm33)).sonuc.veri);
+    const prj = Object.keys(zip.files).find((a) => a.endsWith('.prj'));
+    expect(await zip.file(prj).async('string')).toMatch(/TM33|TUREF/);
+
+    const sql = metneCevir((await donustur(ornekFc(), '.sql', tm33)).sonuc.veri);
+    expect(sql).toMatch(/geometry\([A-Za-z]+Z?, 5255\)/);
+  });
+
+  it('HTML harita WGS84 kopyayı gömer (projeksiyonlu koordinat değil)', async () => {
+    const d = await donustur(ornekFc(), '.html', tm33);
+    const html = metneCevir(d.sonuc.veri);
+    // TM33 → WGS84 gidiş-dönüşü son basamakta yuvarlanır (30.4999…); projeksiyonlu metre değeri (≈ 2.4e5) gömülmemeli.
+    const ilkNokta = html.match(/"coordinates":\[([-\d.e]+),([-\d.e]+)/);
+    expect(Number(ilkNokta[1])).toBeCloseTo(30, 6);
+    expect(Number(ilkNokta[2])).toBeCloseTo(40, 6);
+    expect(d.uyarilar.join(' ')).not.toMatch(/WGS84 kopya|haritada gösterilemedi/i);
+  });
+});
+
 describe('islemci — uçtan uca', () => {
   it('oku → donustur → wgs84e zinciri tutarlıdır', async () => {
     const okunan = await oku({ ad: 'a.geojson', veri: kodla(JSON.stringify(ornekFc())) });

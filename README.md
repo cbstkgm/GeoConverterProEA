@@ -37,8 +37,16 @@ GeoConverterProEA, CBS (Coğrafi Bilgi Sistemi) verilerini **tamamen tarayıcıd
 | `.kmz` | Sıkıştırılmış KML |
 | `.csv` | WKT sütunlu CSV (UTF-8 BOM, Excel uyumlu) |
 | `.gml` | Netcad / TKGM uyumlu GML (yalnızca poligon; Python aracıyla birebir aynı çıktı) |
+| `.dxf` | DXF (AutoCAD R12, Netcad uyumlu; katmanlar, etiketler, öznitelikler XDATA olarak, Windows-1254) |
+| `.zip` | Zipli ESRI Shapefile (geometri ailesi başına katman; `.shp/.shx/.dbf/.prj/.cpg`, UTF-8) |
+| `.gpkg` | OGC GeoPackage 1.3 (SQLite; tekil/çoklu karışımı Multi* olarak, aile başına tablo) |
+| `.wkb` | Well-Known Binary (satır başına bir hex WKB) |
+| `.sql` | PostGIS SQL betiği (`CREATE TABLE` + toplu `INSERT` + GIST indeks, EWKB geometri) |
+| `.xyz` | XYZ nokta bulutu (tüm köşe noktaları) |
+| `.html` | Tek dosyalık Leaflet harita sayfası (CARTO / Esri uydu / OSM altlıkları) |
+| `.md` | Markdown öznitelik tablosu (GFM) |
 
-Format kataloğunda "planlanan" olarak işaretli diğer formatlar (ör. GeoPackage, DXF) henüz tarayıcıda desteklenmez.
+Format kataloğunda "planlanan" olarak işaretli diğer formatlar (ör. DWG, NCZ, IFC) henüz tarayıcıda desteklenmez.
 
 ### Koordinat sistemleri
 

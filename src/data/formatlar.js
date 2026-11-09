@@ -34,7 +34,7 @@ const KATALOG = [
     kategori: "CBS ve Veritabanı Geometri",
     formatlar: [
       { uzanti: ".gdb", aciklama: "Esri File Geodatabase" },
-      { uzanti: ".shp", aciklama: "Shapefile" },
+      { uzanti: ".zip", aciklama: "ESRI Shapefile (zipli)" },
       { uzanti: ".geojson", aciklama: "GeoJSON" },
       { uzanti: ".kml", aciklama: "KML" },
       { uzanti: ".kmz", aciklama: "KMZ" },

@@ -9,6 +9,7 @@ import { zDegerleriniKaldir, hassasiyetUygula, istatistikHesapla, geometriTipiDo
 import { koordinatDonustur, wgs84OlabilirMi } from '../lib/projeksiyon.js';
 import { WGS84, wgs84ZorunluMu } from '../lib/katalog.js';
 import { gecerlilikDenetle } from '../lib/gecerlilik.js';
+import { SQL_WASM_URL } from '../lib/sqlWasm.js';
 
 export { WGS84 };
 
@@ -149,12 +150,19 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
     fc = hassasiyetUygula(fc, hassasiyet);
   }
 
-  await bildir(ilerle, 55, 'Dosya yazılıyor');
-  const sonuc = await dosyaYaz(fc, hedefUzanti, { noktaKonumDogrulugu });
-  if (Array.isArray(sonuc.uyarilar)) uyarilar.push(...sonuc.uyarilar);
-
-  await bildir(ilerle, 80, 'Harita önizlemesi hazırlanıyor');
+  // Harita kopyası yazmadan önce hazırlanır: HTML harita çıktısı WGS84 kopyayı sayfaya gömer.
+  await bildir(ilerle, 50, 'Harita önizlemesi hazırlanıyor');
   const haritaGeojson = hedefCrs === WGS84 ? fc : koordinatDonustur(fc, hedefCrs, WGS84);
+
+  await bildir(ilerle, 60, 'Dosya yazılıyor');
+  const sonuc = await dosyaYaz(fc, hedefUzanti, {
+    noktaKonumDogrulugu,
+    crs: hedefCrs,
+    haritaGeojson,
+    sqlWasmUrl: SQL_WASM_URL,
+    etiketler: true,
+  });
+  if (Array.isArray(sonuc.uyarilar)) uyarilar.push(...sonuc.uyarilar);
 
   await bildir(ilerle, 88, 'İstatistikler hesaplanıyor');
   const istatistik = istatistikHesapla(fc);

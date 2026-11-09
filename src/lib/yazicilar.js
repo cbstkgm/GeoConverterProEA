@@ -5,6 +5,14 @@ import JSZip from 'jszip';
 
 import { DESTEKLENEN_CIKTILAR } from './katalog.js';
 import { netcadGmlYaz } from './gml.js';
+import { dxfYaz } from './bicimler/dxf.js';
+import { shapefileYaz } from './bicimler/shapefile.js';
+import { geopackageYaz } from './bicimler/geopackage.js';
+import { wkbYaz } from './bicimler/wkb.js';
+import { sqlYaz } from './bicimler/sql.js';
+import { xyzYaz } from './bicimler/xyz.js';
+import { htmlYaz } from './bicimler/html.js';
+import { markdownYaz } from './bicimler/markdown.js';
 
 export { DESTEKLENEN_CIKTILAR };
 
@@ -195,6 +203,14 @@ const YAZICILAR = {
   '.kmz': kmzYaz,
   '.csv': csvYaz,
   '.gml': gmlYaz,
+  '.dxf': dxfYaz,
+  '.zip': shapefileYaz,
+  '.gpkg': geopackageYaz,
+  '.wkb': wkbYaz,
+  '.sql': sqlYaz,
+  '.xyz': xyzYaz,
+  '.html': htmlYaz,
+  '.md': markdownYaz,
 };
 
 export async function dosyaYaz(fc, uzanti, secenekler = {}) {
