@@ -12,3 +12,21 @@ export const PLANLANAN_GRUPLAR = desteklenen_formatlar
 
 export const VARSAYILAN_HEDEF =
   TARAYICI_FORMATLARI.find((f) => f.uzanti === '.wkt')?.uzanti ?? TARAYICI_FORMATLARI[0]?.uzanti ?? '';
+
+// Türkçe karakter yazmadan da bulunabilsin: "gorunum" → "görünüm", "Iges" → "ıges/iges".
+const KATLAMA = { ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', â: 'a', î: 'i', û: 'u' };
+export function aramaMetni(metin) {
+  return String(metin ?? '')
+    .toLocaleLowerCase('tr')
+    .replace(/[çğıöşüâîû]/g, (h) => KATLAMA[h])
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Aramadaki her kelime format adı, uzantısı veya kategorisinde geçmeli. */
+export function formatEslesir(format, kategori, arama) {
+  const kelimeler = aramaMetni(arama).split(' ').filter(Boolean);
+  if (kelimeler.length === 0) return true;
+  const hedef = aramaMetni(`${format.aciklama} ${format.uzanti} ${kategori ?? ''}`);
+  return kelimeler.every((k) => hedef.includes(k));
+}

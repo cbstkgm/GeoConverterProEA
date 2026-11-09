@@ -1,5 +1,27 @@
+import { useMemo } from 'react';
+import { uyarilariGrupla } from './uyariGrupla';
+
 const sayi = (n) => (typeof n === 'number' ? n.toLocaleString('tr-TR') : '—');
 const koord = (n) => (Number.isFinite(n) ? Number(n.toFixed(6)).toString() : '?');
+
+function UyariListesi({ uyarilar }) {
+  const kalemler = useMemo(() => uyarilariGrupla(uyarilar), [uyarilar]);
+  if (!kalemler.length) return null;
+  const toplam = uyarilar.length;
+  return (
+    <details className="uyari-kutusu" open>
+      <summary>
+        ⚠️ {sayi(toplam)} uyarı
+        {kalemler.length < toplam ? ` (${sayi(kalemler.length)} başlıkta toplandı)` : ''}
+      </summary>
+      <ul className="uyari-listesi" aria-label="Uyarılar" tabIndex={0}>
+        {kalemler.map((k, i) => (
+          <li key={i}>{k.metin}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
 
 function GecerlilikOzeti({ gecerlilik }) {
   const { denetlenen, gecerli, gecersiz, sorunlar, kesildi } = gecerlilik;
@@ -66,13 +88,7 @@ export default function IstatistikKarti({ baslik, istatistik, uyarilar, gecerlil
         </dl>
       )}
       {gecerlilik && <GecerlilikOzeti gecerlilik={gecerlilik} />}
-      {uyarilar?.length > 0 && (
-        <ul className="uyari-listesi" aria-label="Uyarılar">
-          {uyarilar.map((u, i) => (
-            <li key={i}>⚠️ {u}</li>
-          ))}
-        </ul>
-      )}
+      <UyariListesi uyarilar={uyarilar} />
     </section>
   );
 }

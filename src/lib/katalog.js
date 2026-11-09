@@ -24,6 +24,7 @@ export const DESTEKLENEN_CIKTILAR = [
   { uzanti: '.kml', aciklama: 'KML 2.2 (Google Earth)', mime: 'application/vnd.google-earth.kml+xml' },
   { uzanti: '.kmz', aciklama: 'KMZ (sıkıştırılmış KML)', mime: 'application/vnd.google-earth.kmz' },
   { uzanti: '.csv', aciklama: 'CSV (WKT sütunlu, UTF-8 BOM)', mime: 'text/csv' },
+  { uzanti: '.gml', aciklama: 'GML (Netcad / TKGM uyumlu)', mime: 'application/gml+xml' },
 ];
 
 /** KML 2.2 standardı koordinatları yalnızca WGS84 boylam/enlem olarak tanımlar. */

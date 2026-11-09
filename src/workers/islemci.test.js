@@ -176,6 +176,18 @@ describe('islemci — donustur', () => {
     expect(gecerlilik).toMatchObject({ denetlenen: 1, gecersiz: 1 });
   });
 
+  it('GML: nokta konum doğruluğu seçeneği tabaka adına yansır', async () => {
+    const fc = {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: { ada: 5494, parsel: 14 }, geometry: { type: 'Polygon', coordinates: [[[30, 40], [31, 40], [31, 41], [30, 40]]] } }],
+    };
+    const d = await donustur(fc, '.gml', { kaynakCrs: 'EPSG:4326', hedefCrs: 'EPSG:4326', noktaKonumDogrulugu: '0,21' });
+    const gml = metneCevir(d.sonuc.veri);
+    expect(gml).toContain('<TKGM:ad>5494/14</TKGM:ad>');
+    expect(gml).toContain('<TKGM:tabaka>TK_PARSEL_021</TKGM:tabaka>');
+    expect(d.uyarilar.join(' ')).toMatch(/TK_PARSEL_021: 1/);
+  });
+
   it('KML/KMZ çıktısında WGS84 dışı hedef koordinat sistemini reddeder', async () => {
     for (const uzanti of ['.kml', '.KMZ']) {
       await expect(

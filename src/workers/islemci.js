@@ -111,7 +111,8 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
   if (typeof hedefUzanti !== 'string' || hedefUzanti.trim() === '') {
     throw new Error('Hedef dosya formatı belirtilmedi.');
   }
-  const { kaynakCrs, hedefCrs, zTemizle = false, hassasiyet = null, geometriTipi = null } = secenekler || {};
+  const { kaynakCrs, hedefCrs, zTemizle = false, hassasiyet = null, geometriTipi = null, noktaKonumDogrulugu = null } =
+    secenekler || {};
   crsDogrula(kaynakCrs, 'kaynak');
   crsDogrula(hedefCrs, 'hedef');
   if (wgs84ZorunluMu(hedefUzanti) && hedefCrs.trim().toUpperCase() !== WGS84) {
@@ -149,7 +150,8 @@ export async function donustur(geojson, hedefUzanti, secenekler, ilerle) {
   }
 
   await bildir(ilerle, 55, 'Dosya yazılıyor');
-  const sonuc = await dosyaYaz(fc, hedefUzanti);
+  const sonuc = await dosyaYaz(fc, hedefUzanti, { noktaKonumDogrulugu });
+  if (Array.isArray(sonuc.uyarilar)) uyarilar.push(...sonuc.uyarilar);
 
   await bildir(ilerle, 80, 'Harita önizlemesi hazırlanıyor');
   const haritaGeojson = hedefCrs === WGS84 ? fc : koordinatDonustur(fc, hedefCrs, WGS84);

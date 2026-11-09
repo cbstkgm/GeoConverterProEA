@@ -36,6 +36,7 @@ GeoConverterProEA, CBS (Coğrafi Bilgi Sistemi) verilerini **tamamen tarayıcıd
 | `.kml` | KML 2.2 |
 | `.kmz` | Sıkıştırılmış KML |
 | `.csv` | WKT sütunlu CSV (UTF-8 BOM, Excel uyumlu) |
+| `.gml` | Netcad / TKGM uyumlu GML (yalnızca poligon; Python aracıyla birebir aynı çıktı) |
 
 Format kataloğunda "planlanan" olarak işaretli diğer formatlar (ör. GeoPackage, DXF) henüz tarayıcıda desteklenmez.
 
@@ -119,6 +120,11 @@ python cografi_donusturucu.py girdi.csv cikti.gpkg --kaynak-crs EPSG:4326 --hede
 - **Girdi:** `.csv`, `.shp`, `.zip` (Shapefile), `.gml`, `.geojson`, `.json`, `.kml`, `.kmz`, `.gpkg`, `.gpx`, `.wkt`
 - **Çıktı:** `.csv`, `.shp`, `.geojson`, `.gpkg`, `.kml`, `.kmz`, `.wkt`, `.gml` / `.ncz` (Netcad/TKGM uyumlu GML)
 - KML/KMZ çıktısı otomatik olarak WGS84'e (EPSG:4326) dönüştürülür. `-v` ayrıntılı log verir.
+- GML/NCZ çıktısı TKGM adlandırmasına uyar (KDB GML Converter 7.2): parsel adı `ada/parsel` (ör. `5494/14`), tabaka `TK_PARSEL_abc` (nokta konum doğruluğu 0,21 → `TK_PARSEL_021`). Doğruluk verideki `nkd` sütunundan alınır; yoksa `--nkd 0,21` ile varsayılan verilir. Web uygulamasıyla aynı girdiden bayt bayt aynı GML üretilir.
+
+```bash
+python cografi_donusturucu.py parseller.geojson parseller.gml --nkd 0,21
+```
 
 ## Kullanılan teknolojiler
 

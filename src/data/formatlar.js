@@ -25,7 +25,7 @@ const KATALOG = [
   {
     kategori: "3B Kent Modelleri ve Kadastro",
     formatlar: [
-      { uzanti: ".gml", aciklama: "CityGML / GML" },
+      { uzanti: ".gml", aciklama: "GML (Netcad / TKGM uyumlu)" },
       { uzanti: ".xml", aciklama: "LandXML / TKGM CityGML" },
       { uzanti: ".ifc", aciklama: "BIM / Yapı Bilgi Modellemesi" }
     ]

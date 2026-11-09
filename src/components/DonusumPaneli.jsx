@@ -1,5 +1,6 @@
 import { KOORDINAT_SISTEMLERI, GEOMETRI_TIPI_SECENEKLERI } from '../lib/katalog';
-import { TARAYICI_FORMATLARI, PLANLANAN_GRUPLAR } from './formatSecenekleri';
+import HedefFormatSecici from './HedefFormatSecici';
+import { tabakaAdi } from '../lib/gml';
 
 const HASSASIYETLER = [2, 3, 4, 5, 6, 7, 8];
 
@@ -29,6 +30,36 @@ function CrsSecici({ id, etiket, deger, onDegistir, devreDisi, not }) {
   );
 }
 
+function TkgmAyarlari({ deger, onDegistir, devreDisi }) {
+  const bos = !deger || !String(deger).trim();
+  const tabaka = bos ? null : tabakaAdi(deger);
+  let not;
+  if (bos) not = 'Boş bırakılırsa verideki "nkd" sütunu kullanılır; o da yoksa tabaka "TK_PARSEL" olur.';
+  else if (tabaka) not = `Tabaka: ${tabaka} (verideki "nkd" sütunu varsa o önceliklidir). Parsel adı "ada/parsel" biçiminde yazılır.`;
+  else not = "Geçersiz değer: 0,01 ile 9,99 m arasında girin (ör. 0,21).";
+  return (
+    <div className="form-grubu tkgm-ayarlari">
+      <label htmlFor="nkd">Nokta konum doğruluğu (m) — TKGM tabaka adı</label>
+      <input
+        id="nkd"
+        type="text"
+        inputMode="decimal"
+        className="format-arama"
+        placeholder="ör. 0,21 → TK_PARSEL_021"
+        value={deger}
+        onChange={(e) => onDegistir(e.target.value)}
+        disabled={devreDisi}
+        aria-invalid={!bos && !tabaka}
+        aria-describedby="nkd-not"
+        autoComplete="off"
+      />
+      <small id="nkd-not" className={`alan-notu${!bos && !tabaka ? ' alan-notu-hata' : ''}`}>
+        {not}
+      </small>
+    </div>
+  );
+}
+
 export default function DonusumPaneli({
   hedefFormat,
   onHedefFormat,
@@ -43,6 +74,8 @@ export default function DonusumPaneli({
   onHassasiyet,
   geometriTipi,
   onGeometriTipi,
+  noktaKonumDogrulugu,
+  onNoktaKonumDogrulugu,
   onBaslat,
   baslatilabilir,
   mesgul,
@@ -54,32 +87,11 @@ export default function DonusumPaneli({
     <div className="fluent-panel kontrol-paneli">
       <h2 className="panel-baslik">Dönüşüm Ayarları</h2>
 
-      <div className="form-grubu">
-        <label htmlFor="hedef-format">Hedef format</label>
-        <select
-          id="hedef-format"
-          value={hedefFormat}
-          onChange={(e) => onHedefFormat(e.target.value)}
-          disabled={mesgul}
-        >
-          <optgroup label="Tarayıcıda desteklenen">
-            {TARAYICI_FORMATLARI.map((f) => (
-              <option key={`t-${f.uzanti}`} value={f.uzanti}>
-                {f.aciklama} ({f.uzanti})
-              </option>
-            ))}
-          </optgroup>
-          {PLANLANAN_GRUPLAR.map((g) => (
-            <optgroup key={g.kategori} label={`${g.kategori} — yakında`}>
-              {g.formatlar.map((f) => (
-                <option key={`${g.kategori}-${f.uzanti}`} value={f.uzanti} disabled>
-                  {f.aciklama} ({f.uzanti}) (yakında)
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </div>
+      <HedefFormatSecici deger={hedefFormat} onDegistir={onHedefFormat} devreDisi={mesgul} />
+
+      {hedefFormat === '.gml' && (
+        <TkgmAyarlari deger={noktaKonumDogrulugu} onDegistir={onNoktaKonumDogrulugu} devreDisi={mesgul} />
+      )}
 
       <div className="crs-izgara">
         <CrsSecici

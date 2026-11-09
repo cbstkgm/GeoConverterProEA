@@ -222,10 +222,20 @@ describe('GPX', () => {
 });
 
 describe('WKT / TXT', () => {
+  it('birden fazla satıra yayılmış geometriyi birleştirerek okur', async () => {
+    const metin = ['POLYGON ((30 10,', '  40 40,', '  20 40,', '  30 10))', 'POINT (1 2)', 'POLYGON ((1 1, 2 2', ''].join('\n');
+    const { geojson, uyarilar } = await dosyaOku({ ad: 'cok.wkt', veri: new TextEncoder().encode(metin).buffer });
+    expect(geojson.features.map((f) => f.geometry.type)).toEqual(['Polygon', 'Point']);
+    expect(geojson.features[0].geometry.coordinates[0]).toHaveLength(4);
+    expect(uyarilar).toHaveLength(1);
+    expect(uyarilar[0]).toMatch(/^Satır 6–7: WKT okunamadı/);
+  });
+
   it('satır başına bir WKT, bozuk satır uyarıyla atlanır', async () => {
     const { geojson, uyarilar } = await dosyaOku({ ad: 'ornek.wkt', veri: fixture('ornek.wkt') });
     expect(geojson.features.map((f) => f.geometry.type)).toEqual(['Point', 'LineString', 'Polygon']);
-    expect(uyarilar).toEqual(['Satır 4: geçersiz WKT atlandı.']);
+    expect(uyarilar).toHaveLength(1);
+    expect(uyarilar[0]).toMatch(/^Satır 4: WKT okunamadı \(.+\), atlandı\.$/);
   });
 
   it('.txt de WKT olarak okunur (CRLF)', async () => {
@@ -282,7 +292,22 @@ describe('CSV', () => {
   it('bozuk WKT satırı uyarıyla atlanır', async () => {
     const { geojson, uyarilar } = await oku('a.csv', 'wkt\nPOINT (1 2)\nbozuk\n');
     expect(geojson.features).toHaveLength(1);
-    expect(uyarilar).toEqual(['Satır 3: geçersiz veya boş WKT, satır atlandı.']);
+    expect(uyarilar).toEqual(['Satır 3: geometri okunamadı (bilinmeyen geometri tipi: BOZUK), satır atlandı.']);
+  });
+
+  it('boş geometri hücresi ve EMPTY ayrı nedenle bildirilir', async () => {
+    const { geojson, uyarilar } = await oku('a.csv', 'ad;wkt\nA;\nB;POLYGON EMPTY\nC;POINT Z (1 2 3)\n');
+    expect(geojson.features).toHaveLength(1);
+    expect(uyarilar).toEqual([
+      'Satır 2: geometri hücresi boş, satır atlandı.',
+      'Satır 3: boş geometri (EMPTY), satır atlandı.',
+    ]);
+  });
+
+  it('PostGIS hex EWKB ve SRID önekli EWKT sütununu okur', async () => {
+    const { geojson, uyarilar } = await oku('a.csv', 'geom\n0101000020E61000000000000000003E400000000000004440\nSRID=4326;POINT (1 2)\n');
+    expect(uyarilar).toEqual([]);
+    expect(geojson.features.map((f) => f.geometry.coordinates)).toEqual([[30, 40], [1, 2]]);
   });
 });
 

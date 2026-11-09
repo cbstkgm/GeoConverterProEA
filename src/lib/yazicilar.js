@@ -4,6 +4,7 @@ import wellknown from 'wellknown';
 import JSZip from 'jszip';
 
 import { DESTEKLENEN_CIKTILAR } from './katalog.js';
+import { netcadGmlYaz } from './gml.js';
 
 export { DESTEKLENEN_CIKTILAR };
 
@@ -182,12 +183,18 @@ function csvYaz(fc) {
 }
 
 // ---------------------------------------------------------------- Giriş noktası
+async function gmlYaz(fc, secenekler) {
+  const { metin, uyarilar } = netcadGmlYaz(fc, { noktaKonumDogrulugu: secenekler.noktaKonumDogrulugu });
+  return { veri: metin, onizleme: metin, uyarilar };
+}
+
 const YAZICILAR = {
   '.geojson': geojsonYaz,
   '.wkt': wktYaz,
   '.kml': kmlYaz,
   '.kmz': kmzYaz,
   '.csv': csvYaz,
+  '.gml': gmlYaz,
 };
 
 export async function dosyaYaz(fc, uzanti, secenekler = {}) {
@@ -199,6 +206,6 @@ export async function dosyaYaz(fc, uzanti, secenekler = {}) {
     throw new Error(`"${uzanti}" çıktı formatı tarayıcıda desteklenmiyor. Desteklenen formatlar: ${liste}.`);
   }
   objeleriAl(fc);
-  const { veri, onizleme } = await yazici(fc, secenekler || {});
-  return { veri, mime: tanim.mime, uzanti: u, onizleme };
+  const { veri, onizleme, uyarilar = [] } = await yazici(fc, secenekler || {});
+  return { veri, mime: tanim.mime, uzanti: u, onizleme, uyarilar };
 }

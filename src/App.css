@@ -180,6 +180,47 @@ select:disabled {
   font-size: 0.8rem;
 }
 
+.alan-notu-hata {
+  color: #ff8a80;
+}
+
+.format-arama {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-kenarlik);
+  background: var(--buton-arka-plan);
+  color: var(--yazi-renk);
+  font: inherit;
+  font-size: 0.95rem;
+}
+
+.format-arama:focus {
+  outline: none;
+  border-color: var(--vurgu-renk);
+}
+
+.format-arama::placeholder {
+  color: #8a8a8a;
+}
+
+/* Arama sırasında eşleşmeler açık liste olarak görünür. */
+select.format-liste-acik {
+  padding: 6px;
+  overflow-y: auto;
+}
+
+select.format-liste-acik option {
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+select.format-liste-acik option:checked {
+  background: var(--vurgu-renk-koyu);
+  color: #ffffff;
+}
+
 .gecerlilik {
   margin-top: 10px;
   padding: 8px 10px;
@@ -217,7 +258,22 @@ select:disabled {
   opacity: 0.8;
 }
 
+.uyari-kutusu {
+  margin-top: 10px;
+  color: #ffd27f;
+  font-size: 0.8rem;
+}
+
+.uyari-kutusu > summary {
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+}
+
 .uyari-listesi {
+  max-height: 140px;
+  overflow-y: auto;
+  padding-right: 4px;
   list-style: none;
   margin-top: 10px;
   display: flex;
@@ -247,4 +303,135 @@ select:disabled {
   .istatistik-liste {
     grid-template-columns: 1fr;
   }
+}
+
+/* ------------------------------------------------------------------------
+   Tek ekran düzeni (geniş ekranlar): sayfa kaymaz, her panel kendi içinde kayar.
+   Dar veya alçak ekranlarda normal sayfa kaydırması korunur.
+   ------------------------------------------------------------------------ */
+@media (min-width: 1101px) and (min-height: 620px) {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    padding: 12px 16px;
+    overflow: hidden;
+  }
+
+  #root {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  .uygulama-kapsayici {
+    height: 100%;
+    margin: 0;
+    gap: 12px;
+  }
+
+  .baslik-alani {
+    flex: none;
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    flex-wrap: wrap;
+    column-gap: 16px;
+  }
+
+  .baslik-alani h1 {
+    font-size: 1.6rem;
+    margin: 0;
+  }
+
+  .baslik-alani .aciklama {
+    font-size: 0.9rem;
+  }
+
+  .grid-kapsayici {
+    flex: 1;
+    min-height: 0;
+    gap: 16px;
+  }
+
+  .fluent-panel {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 16px 18px;
+  }
+
+  .kontrol-paneli {
+    justify-content: flex-start;
+  }
+
+  .panel-baslik {
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+  }
+
+  .form-grubu {
+    margin-bottom: 12px;
+  }
+
+  .harita-kaynak,
+  .harita-sonuc {
+    flex: none;
+    height: clamp(180px, 32vh, 340px);
+  }
+
+  .dosya-yukleme-alani {
+    flex: none;
+  }
+
+  .metin-kutusu-kapsayici {
+    flex: none;
+    margin-top: 12px;
+  }
+
+  .metin-kutusu-kapsayici textarea {
+    min-height: 90px;
+    max-height: 180px;
+  }
+
+  /* Bildirim düzeni itmesin: sağ üstte yüzen kart. */
+  .bildirim-alani {
+    position: fixed;
+    top: 12px;
+    right: 16px;
+    z-index: 2000;
+    width: min(460px, calc(100vw - 32px));
+    margin: 0;
+  }
+
+  .bildirim {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* İnce, temaya uygun kaydırma çubukları (paneller, listeler, metin kutuları). */
+.fluent-panel,
+.uyari-listesi,
+.gecerlilik-listesi,
+.metin-kutusu-kapsayici textarea,
+select.format-liste-acik {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.fluent-panel::-webkit-scrollbar,
+.uyari-listesi::-webkit-scrollbar,
+.gecerlilik-listesi::-webkit-scrollbar {
+  width: 8px;
+}
+
+.fluent-panel::-webkit-scrollbar-thumb,
+.uyari-listesi::-webkit-scrollbar-thumb,
+.gecerlilik-listesi::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
 }

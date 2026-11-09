@@ -12,6 +12,7 @@ Komut satırı:
 """
 import argparse
 import logging
+import math
 import os
 import re
 import sys
@@ -201,6 +202,97 @@ def bos_mu(deger) -> bool:
 # ---------------------------------------------------------------------------
 # Okuyucular
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# TKGM adlandırma (Kadastro Dairesi Başkanlığı, GML Converter 7.2 Güncelleme Notları)
+#  - Parsel adı: "ada/parsel" (ör. 5494/14)
+#  - Tabaka: TK_PARSEL_abc — abc, Tapu Planlarında Yanılma Sınırı Yönetmeliği Madde 9'daki nokta
+#    konum doğruluğunun noktasız/virgülsüz yazımı (0,21 -> 021, 0,09 -> 009, 1 -> 100, 1,75 -> 175).
+#    Doğruluk bilinmiyorsa "TK_PARSEL".
+# Web uygulamasındaki src/lib/gml.js ile birebir aynı kurallar (çıktılar bayt bayt aynıdır).
+# ---------------------------------------------------------------------------
+
+_TR_KATLAMA = str.maketrans({"ç": "c", "ğ": "g", "ı": "i", "ö": "o", "ş": "s", "ü": "u"})
+
+ADA_SUTUNLARI = ['ada', 'adano', 'adanumarasi', 'adanum', 'adaadi']
+PARSEL_SUTUNLARI = ['parsel', 'parselno', 'parselnumarasi', 'parselnum', 'parseladi']
+ADA_PARSEL_SUTUNLARI = ['adaparsel', 'adaparselno', 'parseladi', 'adi']
+NKD_SUTUNLARI = ['nkd', 'noktakonumdogrulugu', 'konumdogrulugu', 'noktakonumdogruluk', 'nktkonumdogrulugu']
+TABAKA_SUTUNLARI = ['tabaka', 'katman', 'layer', 'tabakaadi']
+TABAKA_DESENI = re.compile(r"^TK_PARSEL(?:_\d{3})?$", re.IGNORECASE)
+
+
+def sutun_anahtari(ad) -> str:
+    """Sütun adını karşılaştırma için sadeleştirir: "Ada No" -> "adano", "Nokta Konum Doğruluğu" -> "noktakonumdogrulugu"."""
+    metin = str(ad).replace("I", "ı").replace("İ", "i").lower().translate(_TR_KATLAMA)
+    return re.sub(r"[^a-z0-9]", "", metin)
+
+
+def _bos_metin_mi(deger) -> bool:
+    return bos_mu(deger) or str(deger).strip() == ""
+
+
+def sutun_degeri(ozellikler: dict, adaylar):
+    """Özellikler içinde aday adlardan ilk bulunanın (boş olmayan) değerini döndürür; yoksa None."""
+    harita = {}
+    for anahtar in ozellikler:
+        harita.setdefault(sutun_anahtari(anahtar), anahtar)
+    for aday in adaylar:
+        gercek = harita.get(aday)
+        if gercek is not None and not _bos_metin_mi(ozellikler[gercek]):
+            return ozellikler[gercek]
+    return None
+
+
+def numara_metni(deger) -> str:
+    """14, "14", 14.0, "14.0" -> "14"; diğer metinler kırpılmış olarak."""
+    if isinstance(deger, (float, np.floating)) and float(deger).is_integer():
+        return str(int(deger))
+    metin = str(deger).strip()
+    return re.sub(r"\.0+$", "", metin) if re.fullmatch(r"-?\d+\.0+", metin) else metin
+
+
+def tabaka_adi(dogruluk):
+    """Nokta konum doğruluğundan (metre; "0,21" de olur) TKGM tabaka adı; geçersizse None."""
+    if _bos_metin_mi(dogruluk):
+        return None
+    try:
+        sayi = float(str(dogruluk).strip().replace(",", "."))
+    except ValueError:
+        return None
+    if not math.isfinite(sayi):
+        return None
+    kod = math.floor(sayi * 100 + 0.5)  # JS Math.round ile aynı (Python round() yarımları çifte yuvarlar)
+    if kod < 1 or kod > 999:
+        return None
+    return f"TK_PARSEL_{kod:03d}"
+
+
+def ada_parsel_adi(ozellikler: dict):
+    """Objenin TKGM parsel adı ("ada/parsel"); bulunamazsa None."""
+    ada = sutun_degeri(ozellikler, ADA_SUTUNLARI)
+    parsel = sutun_degeri(ozellikler, PARSEL_SUTUNLARI)
+    if ada is not None and parsel is not None:
+        return f"{numara_metni(ada)}/{numara_metni(parsel)}"
+    birlesik = sutun_degeri(ozellikler, ADA_PARSEL_SUTUNLARI)
+    if birlesik is not None and re.fullmatch(r"\s*\d+\s*/\s*\d+\s*", str(birlesik)):
+        return re.sub(r"\s+", "", str(birlesik))
+    return None
+
+
+def obje_tabakasi(ozellikler: dict, varsayilan_dogruluk=None):
+    """(tabaka, kaynak) — öncelik: verideki geçerli tabaka -> nkd sütunu -> varsayılan -> "TK_PARSEL"."""
+    mevcut = sutun_degeri(ozellikler, TABAKA_SUTUNLARI)
+    if mevcut is not None and TABAKA_DESENI.match(str(mevcut).strip()):
+        return str(mevcut).strip().upper(), "veri"
+    nkd = tabaka_adi(sutun_degeri(ozellikler, NKD_SUTUNLARI))
+    if nkd:
+        return nkd, "nkd"
+    varsayilan = tabaka_adi(varsayilan_dogruluk)
+    if varsayilan:
+        return varsayilan, "varsayilan"
+    return "TK_PARSEL", "yok"
+
 
 class VeriOkuyucuBase:
     """Veri okumak için temel arayüz (Interface)."""
@@ -443,11 +535,15 @@ class NetcadGMLYazici(VeriYaziciBase):
     """Orijinal koda sadık kalarak, poligonları NetCAD/TKGM GML formatında yazar."""
     TKGM_NS = "http://www.tkgm.gov.tr"
     GML_NS = "http://www.opengis.net/gml"
-    SABIT_ALANLAR = {'geometry', 'ad', 'id', 'group_id', 'ilcead', 'geom'}
+    SABIT_ALANLAR = {'geometry', 'ad', 'id', 'group_id', 'ilcead', 'geom', 'tabaka'}
 
-    def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str):
+    def yaz(self, gdf: gpd.GeoDataFrame, dosya_yolu: str, nokta_konum_dogrulugu=None):
+        """nokta_konum_dogrulugu: verideki nkd sütunu yoksa kullanılacak varsayılan (m), ör. 0.21 -> TK_PARSEL_021."""
         logger.info(f"NetcadGMLYazici ile işleniyor ve yazılıyor: {dosya_yolu}")
         TKGM, GML = self.TKGM_NS, self.GML_NS
+        if not _bos_metin_mi(nokta_konum_dogrulugu) and tabaka_adi(nokta_konum_dogrulugu) is None:
+            raise ValueError(f"Nokta konum doğruluğu geçersiz: '{nokta_konum_dogrulugu}'. "
+                             "0,01 ile 9,99 m arasında bir değer girin (ör. 0,21).")
 
         # Sadece poligon ve multipoligon alınıyor
         gdf = gdf[gdf.geometry.geom_type.isin(['Polygon', 'MultiPolygon'])]
@@ -515,6 +611,9 @@ class NetcadGMLYazici(VeriYaziciBase):
                 koordinatlar_ic = etree.SubElement(ic_cizgi, f"{{{GML}}}coordinates")
                 koordinatlar_ic.text = " ".join([f"{x},{y}" for x, y, *_ in ic_sinir.coords])
 
+        ada_parselsiz = 0
+        tabakasiz = 0
+        tabaka_sayaci = {}
         for id_degeri, satir in toplanmis_gdf.iterrows():
             try:
                 geom = satir.geometry
@@ -524,8 +623,20 @@ class NetcadGMLYazici(VeriYaziciBase):
                 ozellik_elemani = etree.SubElement(kok_eleman, f"{{{TKGM}}}FeatureMember")
                 ozel_alan = etree.SubElement(ozellik_elemani, f"{{{TKGM}}}OzelAlanZemin")
                 etree.SubElement(ozel_alan, f"{{{TKGM}}}id").text = str(id_degeri)
-                ad = satir.get("ilcead", id_degeri)
-                etree.SubElement(ozel_alan, f"{{{TKGM}}}ad").text = str(id_degeri if bos_mu(ad) else ad)
+                ozellikler = {k: satir[k] for k in satir.index if k != 'geometry'}
+                ada_parsel = ada_parsel_adi(ozellikler)
+                if ada_parsel is None:
+                    ada_parselsiz += 1
+                    ad = satir.get("ilcead", id_degeri)
+                    ad = id_degeri if _bos_metin_mi(ad) else ad
+                else:
+                    ad = ada_parsel
+                etree.SubElement(ozel_alan, f"{{{TKGM}}}ad").text = str(ad)
+                tabaka, kaynak = obje_tabakasi(ozellikler, nokta_konum_dogrulugu)
+                tabaka_sayaci[tabaka] = tabaka_sayaci.get(tabaka, 0) + 1
+                if kaynak == "yok":
+                    tabakasiz += 1
+                etree.SubElement(ozel_alan, f"{{{TKGM}}}tabaka").text = tabaka
 
                 for kolon, xml_adi in xml_adlari.items():
                     deger = satir[kolon]
@@ -545,6 +656,15 @@ class NetcadGMLYazici(VeriYaziciBase):
 
             except Exception as e:
                 logger.error(f"'{id_degeri}' id'li nesne islenirken hata: {e}")
+
+        if ada_parselsiz:
+            logger.warning(f"{ada_parselsiz} objede ada/parsel bilgisi bulunamadı ('ada' ve 'parsel' sütunları); "
+                           "ad olarak ilçe adı veya kimlik yazıldı.")
+        if tabakasiz:
+            logger.warning(f"{tabakasiz} objede nokta konum doğruluğu yok; tabaka 'TK_PARSEL' yazıldı. "
+                           "Yanılma sınırı hesabı için --nkd değeri verin veya veride 'nkd' sütunu kullanın.")
+        if tabaka_sayaci:
+            logger.info("Tabakalar: " + ", ".join(f"{t}: {n}" for t, n in sorted(tabaka_sayaci.items())))
 
         agac = etree.ElementTree(kok_eleman)
         agac.write(dosya_yolu, pretty_print=True, xml_declaration=True, encoding="UTF-8")
@@ -613,12 +733,15 @@ class DonusturucuYoneticisi:
         }
 
     def format_algila_ve_donustur(self, girdi_yolu: str, cikti_yolu: str, hedef_kolonlar=None,
-                                  geometri_kolonu=None, kaynak_crs=None, hedef_crs=None):
+                                  geometri_kolonu=None, kaynak_crs=None, hedef_crs=None,
+                                  nokta_konum_dogrulugu=None):
         """Girdiyi okur, (isteğe bağlı) CRS atar/dönüştürür, kolon filtreler ve çıktıyı yazar.
 
         kaynak_crs: Girdide CRS yoksa atanacak CRS (verilmezse EPSG:4326). Girdide farklı CRS
                     varsa ve bu parametre açıkça verildiyse girdinin CRS'si bununla değiştirilir.
         hedef_crs:  Verilirse veri yazılmadan önce bu CRS'ye dönüştürülür (to_crs).
+        nokta_konum_dogrulugu: GML/NCZ çıktısında verideki 'nkd' sütunu yoksa kullanılacak varsayılan
+                    nokta konum doğruluğu (m); TKGM tabaka adını belirler (0,21 -> TK_PARSEL_021).
         """
         girdi_uzanti = os.path.splitext(girdi_yolu)[1].lower()
         cikti_uzanti = os.path.splitext(cikti_yolu)[1].lower()
@@ -710,7 +833,10 @@ class DonusturucuYoneticisi:
             logger.info(f"Tamamen boş olan sütunlar temizlendi: {tum_bos_kolonlar}")
 
         # 2. Yaz
-        yazici.yaz(gdf, cikti_yolu)
+        if isinstance(yazici, NetcadGMLYazici):
+            yazici.yaz(gdf, cikti_yolu, nokta_konum_dogrulugu=nokta_konum_dogrulugu)
+        else:
+            yazici.yaz(gdf, cikti_yolu)
         logger.info("Dönüşüm başarıyla tamamlandı!")
         return cikti_yolu
 
@@ -731,6 +857,9 @@ def arguman_ayristirici() -> argparse.ArgumentParser:
     ayristirici.add_argument("--hedef-crs", default=None, help="Çıktı CRS'si (ör. EPSG:5254); verilirse to_crs yapılır")
     ayristirici.add_argument("--kolonlar", default=None, help="Virgülle ayrılmış, dışa aktarılacak kolonlar (ör. a,b)")
     ayristirici.add_argument("--geometri-kolonu", default=None, help="WKT içeren geometri kolonunun adı")
+    ayristirici.add_argument("--nkd", default=None,
+                             help="GML/NCZ: verideki 'nkd' sütunu yoksa kullanılacak nokta konum doğruluğu (m), "
+                                  "ör. 0.21 -> tabaka TK_PARSEL_021")
     ayristirici.add_argument("-v", "--ayrintili", action="store_true", help="Ayrıntılı (DEBUG) log")
     return ayristirici
 
@@ -747,6 +876,7 @@ def main(argv=None) -> int:
             geometri_kolonu=args.geometri_kolonu,
             kaynak_crs=args.kaynak_crs,
             hedef_crs=args.hedef_crs,
+            nokta_konum_dogrulugu=args.nkd,
         )
     except Exception as e:
         logger.error(f"Dönüşüm başarısız: {e}")

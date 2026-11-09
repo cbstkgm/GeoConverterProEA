@@ -66,9 +66,14 @@ describe('dosyaYaz — genel', () => {
     for (const c of DESTEKLENEN_CIKTILAR) await dosyaYaz(fc, c.uzanti);
     expect(fc).toEqual(kopya);
   });
-  it('boş FeatureCollection her formatta yazılabilir', async () => {
+  it('boş FeatureCollection her formatta yazılabilir (GML hariç: poligon şart)', async () => {
     for (const c of DESTEKLENEN_CIKTILAR) {
-      const s = await dosyaYaz({ type: 'FeatureCollection', features: [] }, c.uzanti);
+      const bos = { type: 'FeatureCollection', features: [] };
+      if (c.uzanti === '.gml') {
+        await expect(dosyaYaz(bos, c.uzanti)).rejects.toThrow(/poligon bulunamadı/);
+        continue;
+      }
+      const s = await dosyaYaz(bos, c.uzanti);
       expect(s.mime).toBe(c.mime);
     }
   });

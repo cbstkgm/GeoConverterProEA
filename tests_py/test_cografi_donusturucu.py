@@ -278,3 +278,90 @@ def test_import_global_logging_yapilandirmaz():
            "print(len(logging.getLogger().handlers))")
     sonuc = subprocess.run([sys.executable, "-c", kod, proje], capture_output=True, text=True, check=True)
     assert sonuc.stdout.strip() == "0"
+
+
+# ---------------------------------------------------------------------------
+# TKGM adlandırma (GML Converter 7.2): ad = ada/parsel, tabaka = TK_PARSEL_abc
+# Web uygulamasındaki src/lib/gml.js ile aynı kurallar.
+# ---------------------------------------------------------------------------
+
+TKGM_NS = "{http://www.tkgm.gov.tr}"
+
+
+class TestTkgmAdlandirma:
+    @pytest.mark.parametrize("nkd, beklenen", [
+        (0.09, "TK_PARSEL_009"), (0.9, "TK_PARSEL_090"), (1, "TK_PARSEL_100"), (1.01, "TK_PARSEL_101"),
+        (1.51, "TK_PARSEL_151"), ("0,21", "TK_PARSEL_021"), ("0.25", "TK_PARSEL_025"), (1.75, "TK_PARSEL_175"),
+        (0.07 + 0.14, "TK_PARSEL_021"),
+        (0.125, "TK_PARSEL_013"),  # yarım değer yukarı yuvarlanır (JS Math.round ile aynı)
+    ])
+    def test_tabaka_adi(self, nkd, beklenen):
+        assert cd.tabaka_adi(nkd) == beklenen
+
+    @pytest.mark.parametrize("nkd", [None, "", "abc", 0, 0.004, 10, -1, float("nan")])
+    def test_gecersiz_dogruluk(self, nkd):
+        assert cd.tabaka_adi(nkd) is None
+
+    @pytest.mark.parametrize("ozellikler, beklenen", [
+        ({"ada": 5494, "parsel": 14}, "5494/14"),
+        ({"ADA": "5494", "PARSEL": "14"}, "5494/14"),
+        ({"Ada No": 5494.0, "Parsel No": "14.0"}, "5494/14"),
+        ({"ada_no": "101", "parsel_no": "7"}, "101/7"),
+        ({"adaparsel": "5494 / 9"}, "5494/9"),
+        ({"ada": 5494}, None),
+        ({"ada": 5494, "parsel": float("nan")}, None),
+        ({}, None),
+    ])
+    def test_ada_parsel_adi(self, ozellikler, beklenen):
+        assert cd.ada_parsel_adi(ozellikler) == beklenen
+
+    def test_tabaka_onceligi(self):
+        assert cd.obje_tabakasi({"tabaka": "tk_parsel_151", "nkd": 0.21}, 0.5) == ("TK_PARSEL_151", "veri")
+        assert cd.obje_tabakasi({"tabaka": "BINA", "Nokta Konum Doğruluğu": "0,21"}, 0.5) == ("TK_PARSEL_021", "nkd")
+        assert cd.obje_tabakasi({}, "1,75") == ("TK_PARSEL_175", "varsayilan")
+        assert cd.obje_tabakasi({}, None) == ("TK_PARSEL", "yok")
+
+
+def _tkgm_girdisi(tmp_path):
+    kare = lambda x: [[x, 39.91], [x + 0.0015, 39.91], [x + 0.0015, 39.912], [x, 39.912], [x, 39.91]]  # noqa: E731
+    ornek = [(14, "1,01"), (15, "0,21"), (12, "1"), (11, "0,09"), (10, "0,9"), (9, "1,51"), (8, None), (7, None)]
+    features = [{
+        "type": "Feature",
+        "properties": {"Ada No": 5494, "Parsel No": p, "NKD": n},
+        "geometry": {"type": "Polygon", "coordinates": [kare(32.84 + i * 0.002)]},
+    } for i, (p, n) in enumerate(ornek)]
+    return yaz(tmp_path / "ada.geojson", json.dumps({"type": "FeatureCollection", "features": features}))
+
+
+def _ad_tabaka(gml_yolu):
+    kok = etree.parse(gml_yolu).getroot()
+    return [(e.find(f"{TKGM_NS}ad").text, e.find(f"{TKGM_NS}tabaka").text) for e in kok.iter(f"{TKGM_NS}OzelAlanZemin")]
+
+
+def test_gml_pdf_ornegi_ada_parsel_ve_tabaka(tmp_path, yonetici):
+    cikti = str(tmp_path / "cikti.gml")
+    yonetici.format_algila_ve_donustur(_tkgm_girdisi(tmp_path), cikti, nokta_konum_dogrulugu="0,5")
+    assert _ad_tabaka(cikti) == [
+        ("5494/14", "TK_PARSEL_101"), ("5494/15", "TK_PARSEL_021"), ("5494/12", "TK_PARSEL_100"),
+        ("5494/11", "TK_PARSEL_009"), ("5494/10", "TK_PARSEL_090"), ("5494/9", "TK_PARSEL_151"),
+        ("5494/8", "TK_PARSEL_050"), ("5494/7", "TK_PARSEL_050"),
+    ]
+
+
+def test_gml_nkd_yoksa_tk_parsel_ve_uyari(tmp_path, yonetici, caplog):
+    cikti = str(tmp_path / "cikti.gml")
+    with caplog.at_level("WARNING"):
+        yonetici.format_algila_ve_donustur(_tkgm_girdisi(tmp_path), cikti)
+    assert _ad_tabaka(cikti)[-1] == ("5494/7", "TK_PARSEL")
+    assert "2 objede nokta konum doğruluğu yok" in caplog.text
+
+
+def test_gml_gecersiz_nkd_hata(tmp_path, yonetici):
+    with pytest.raises(ValueError, match="0,01 ile 9,99"):
+        yonetici.format_algila_ve_donustur(_tkgm_girdisi(tmp_path), str(tmp_path / "c.gml"), nokta_konum_dogrulugu="12")
+
+
+def test_cli_nkd(tmp_path):
+    cikti = str(tmp_path / "cli.gml")
+    assert cd.main([_tkgm_girdisi(tmp_path), cikti, "--nkd", "0,25"]) == 0
+    assert _ad_tabaka(cikti)[-1] == ("5494/7", "TK_PARSEL_025")

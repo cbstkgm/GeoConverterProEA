@@ -3,7 +3,7 @@
 import { DOMParser } from '@xmldom/xmldom';
 import { kml as kmlToGeoJSON, gpx as gpxToGeoJSON } from '@tmcw/togeojson';
 import JSZip from 'jszip';
-import wellknown from 'wellknown';
+import { wktCoz } from './wkt.js';
 import proj4 from 'proj4';
 import { parseShp, parseDbf } from 'shpjs';
 
@@ -171,19 +171,44 @@ function gpxOku(metin) {
 // WKT
 // ---------------------------------------------------------------------------
 
+/** Parantez dengesi (açılan − kapanan). */
+const parantezFarki = (metin) => {
+  let fark = 0;
+  for (const c of metin) {
+    if (c === '(') fark++;
+    else if (c === ')') fark--;
+  }
+  return fark;
+};
+
 function wktOku(metin, uyarilar) {
   const features = [];
   const satirlar = metin.split(/\r\n|\n|\r/);
+  // Bir geometri birden fazla satıra yayılabilir: parantezler kapanana kadar satırlar birleştirilir.
+  let parca = '';
+  let baslangic = 0;
+  let derinlik = 0;
+  const bitir = (sonSatir) => {
+    const etiket = baslangic === sonSatir ? `Satır ${baslangic}` : `Satır ${baslangic}–${sonSatir}`;
+    try {
+      const geometri = wktCoz(parca);
+      if (geometri) features.push({ type: 'Feature', geometry: geometri, properties: {} });
+      else uyarilar.push(`${etiket}: boş geometri (EMPTY) atlandı.`);
+    } catch (e) {
+      uyarilar.push(`${etiket}: WKT okunamadı (${e.message}), atlandı.`);
+    }
+    parca = '';
+    derinlik = 0;
+  };
   satirlar.forEach((satir, i) => {
     const temiz = satir.replace(/^﻿/, '').trim();
-    if (!temiz) return;
-    const geometri = wellknown.parse(temiz);
-    if (!geometri) {
-      uyarilar.push(`Satır ${i + 1}: geçersiz WKT atlandı.`);
-      return;
-    }
-    features.push({ type: 'Feature', geometry: geometri, properties: {} });
+    if (!temiz && !parca) return;
+    if (!parca) baslangic = i + 1;
+    parca += (parca ? ' ' : '') + temiz;
+    derinlik += parantezFarki(temiz);
+    if (derinlik <= 0) bitir(i + 1);
   });
+  if (parca) bitir(satirlar.length);
   if (!features.length) throw new Error('Dosyada geçerli WKT geometrisi bulunamadı.');
   return featureCollection(features);
 }
@@ -291,9 +316,18 @@ function csvOku(metin, uyarilar) {
     let geometri = null;
     if (kullanWkt) {
       const wkt = (alanlar[wktSutun] ?? '').trim();
-      geometri = wkt ? wellknown.parse(wkt) : null;
+      if (!wkt) {
+        uyarilar.push(`Satır ${no}: geometri hücresi boş, satır atlandı.`);
+        continue;
+      }
+      try {
+        geometri = wktCoz(wkt);
+      } catch (e) {
+        uyarilar.push(`Satır ${no}: geometri okunamadı (${e.message}), satır atlandı.`);
+        continue;
+      }
       if (!geometri) {
-        uyarilar.push(`Satır ${no}: geçersiz veya boş WKT, satır atlandı.`);
+        uyarilar.push(`Satır ${no}: boş geometri (EMPTY), satır atlandı.`);
         continue;
       }
     } else {

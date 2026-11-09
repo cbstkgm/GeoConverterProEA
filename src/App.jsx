@@ -50,6 +50,7 @@ function App() {
   const [zTemizle, setZTemizle] = useState(true);
   const [hassasiyet, setHassasiyet] = useState(null);
   const [geometriTipi, setGeometriTipi] = useState(null);
+  const [noktaKonumDogrulugu, setNoktaKonumDogrulugu] = useState('');
 
   const [bildirim, setBildirim] = useState(null);
   const istekNo = useRef(0);
@@ -112,7 +113,14 @@ function App() {
     if (!kaynak) return;
     const no = ++istekNo.current;
     try {
-      const yeni = await donustur(kaynak.geojson, hedefFormat, { kaynakCrs, hedefCrs, zTemizle, hassasiyet, geometriTipi });
+      const yeni = await donustur(kaynak.geojson, hedefFormat, {
+        kaynakCrs,
+        hedefCrs,
+        zTemizle,
+        hassasiyet,
+        geometriTipi,
+        noktaKonumDogrulugu: noktaKonumDogrulugu.trim() || null,
+      });
       if (no !== istekNo.current) return;
       setSonuc(yeni);
       bildir('basari', `Dönüştürüldü: '${dosya.name}' → ${yeni.sonuc.uzanti} (${hedefCrs}).`);
@@ -188,6 +196,8 @@ function App() {
           hassasiyet={hassasiyet}
           geometriTipi={geometriTipi}
           onGeometriTipi={setGeometriTipi}
+          noktaKonumDogrulugu={noktaKonumDogrulugu}
+          onNoktaKonumDogrulugu={setNoktaKonumDogrulugu}
           onHassasiyet={setHassasiyet}
           onBaslat={donusumuBaslat}
           baslatilabilir={Boolean(kaynak && hedefFormat)}
