@@ -73,6 +73,9 @@ GeoConverterProEA, CBS (Coğrafi Bilgi Sistemi) verilerini **tamamen tarayıcıd
 | `.mvt`, `.pbf` | Mapbox Vector Tile 2.1 (tek döşeme; hedef CRS otomatik Web Mercator) |
 | `.xml` | LandXML 1.2 (parseller, CgPoints) |
 | `.e00` | ArcInfo Export (E00) |
+| `.gdb` | Esri File Geodatabase (OpenFileGDB, ArcGIS 10.x+; `ad.gdb.zip` olarak iner) |
+| `.tab`, `.map` | MapInfo TAB yerel biçimi (`.tab/.dat/.map/.id`, Windows-1254; `ad.tab.zip` olarak iner) |
+| `.sql` | PostGIS veritabanı: `psql -f` ile çalıştırılan SQL betiği |
 
 **3B ağ ve sahne** (poligonlar üçgenlenir; büyük koordinatlar merkeze ötelenir, öteleme dosyada saklanır)
 
@@ -85,7 +88,7 @@ GeoConverterProEA, CBS (Coğrafi Bilgi Sistemi) verilerini **tamamen tarayıcıd
 | `.ma` | Maya ASCII |
 | `.3dm` | Rhino 3DM (rhino3dm) |
 
-Katalogdaki şu formatlar tarayıcıda yazılamaz ve "yakında" olarak kalır: kapalı/belgelenmemiş biçimler (DWG, Netcad NCZ, ACIS SAT, Parasolid, FBX, Blender, Cinema 4D, Maya Binary, FME FFS) ve ağır/karmaşık olanlar (Alembic, Esri File Geodatabase, MapInfo TAB/MAP, LAZ, HDF5). PostGIS veritabanına aktarım için `.sql` çıktısı kullanılabilir.
+Katalogdaki şu formatlar tarayıcıda yazılamaz ve "yakında" olarak kalır: kapalı/belgelenmemiş biçimler (DWG, Netcad NCZ, ACIS SAT, Parasolid, FBX, Blender, Cinema 4D, Maya Binary, FME FFS) ve ağır/karmaşık olanlar (Alembic, LAZ, HDF5).
 
 ### Koordinat sistemleri
 

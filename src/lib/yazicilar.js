@@ -39,6 +39,9 @@ import { vrmlYaz } from './bicimler/vrml.js';
 import { usdYaz, usdzYaz } from './bicimler/usd.js';
 import { mayaYaz } from './bicimler/maya.js';
 import { rhinoYaz } from './bicimler/rhino.js';
+// CBS veritabanı
+import { filegdbYaz } from './bicimler/filegdb.js';
+import { mapinfoYaz } from './bicimler/mapinfo.js';
 
 export { DESTEKLENEN_CIKTILAR };
 
@@ -274,6 +277,9 @@ const YAZICILAR = {
   '.usdz': usdzYaz,
   '.ma': mayaYaz,
   '.3dm': rhinoYaz,
+  '.gdb': filegdbYaz,
+  '.tab': mapinfoYaz,
+  '.map': mapinfoYaz,
 };
 
 export async function dosyaYaz(fc, uzanti, secenekler = {}) {

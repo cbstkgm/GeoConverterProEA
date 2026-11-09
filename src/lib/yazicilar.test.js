@@ -260,10 +260,21 @@ describe('formatlar.js kataloğu', () => {
     const tarayici = tum_formatlari_duz_liste().filter((f) => f.durum === 'tarayici').map((f) => f.uzanti).sort();
     expect(tarayici).toEqual(DESTEKLENEN_CIKTILAR.map((c) => c.uzanti).sort());
   });
-  it('uzantı olmayan "postgis" planlanan olarak işaretlenir', () => {
+  it('klasör tabanlı formatlar ZIP uzantısıyla iner', async () => {
+    const { indirmeUzantisi } = await import('./katalog.js');
+    expect(indirmeUzantisi('.gdb')).toBe('.gdb.zip');
+    expect(indirmeUzantisi('.tab')).toBe('.tab.zip');
+    expect(indirmeUzantisi('.map')).toBe('.tab.zip');
+    expect(indirmeUzantisi('.dxf')).toBe('.dxf');
+  });
+  it('uzantı olmayan girdiler hiçbir zaman "tarayici" olamaz', () => {
     expect(formatDurumu('postgis')).toBe('planlanan');
-    const pg = tum_formatlari_duz_liste().find((f) => f.uzanti === 'postgis');
-    expect(pg.durum).toBe('planlanan');
+  });
+  it('PostGIS girdisi SQL betiği yazıcısına bağlıdır ve katalogda tek .sql girdisi vardır', () => {
+    const sqlGirdileri = tum_formatlari_duz_liste().filter((f) => f.uzanti === '.sql');
+    expect(sqlGirdileri).toHaveLength(1);
+    expect(sqlGirdileri[0]).toMatchObject({ kategori: 'CBS ve Veritabanı Geometri', durum: 'tarayici' });
+    expect(sqlGirdileri[0].aciklama).toMatch(/PostGIS/);
   });
   it('düz liste kategori, uzanti, aciklama ve durum taşır', () => {
     const liste = tum_formatlari_duz_liste();

@@ -40,7 +40,8 @@ const KATALOG = [
       { uzanti: ".kmz", aciklama: "KMZ" },
       { uzanti: ".gpkg", aciklama: "GeoPackage" },
       { uzanti: ".sqlite", aciklama: "SpatiaLite" },
-      { uzanti: "postgis", aciklama: "PostGIS Veritabanı (Geom)" },
+      // Tarayıcı veritabanına bağlanamaz: PostGIS'e aktarım psql ile çalıştırılan SQL betiğiyle yapılır.
+      { uzanti: ".sql", aciklama: "PostGIS Veritabanı (SQL betiği)" },
       { uzanti: ".wkt", aciklama: "Well-Known Text" },
       { uzanti: ".wkb", aciklama: "Well-Known Binary" },
       { uzanti: ".mvt", aciklama: "Vector Tile Geometrisi" },
@@ -94,7 +95,6 @@ const KATALOG = [
       { uzanti: ".txt", aciklama: "Metin Belgesi" },
       { uzanti: ".md", aciklama: "Markdown" },
       { uzanti: ".json", aciklama: "JSON" },
-      { uzanti: ".sql", aciklama: "SQL Script" },
       { uzanti: ".html", aciklama: "HTML Document" }
     ]
   }

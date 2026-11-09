@@ -7,7 +7,7 @@ import { VARSAYILAN_HEDEF } from './components/formatSecenekleri';
 import MetinOnizleme from './components/MetinOnizleme';
 import IstatistikKarti from './components/IstatistikKarti';
 import Bildirim from './components/Bildirim';
-import { WGS84, zorunluCrs } from './lib/katalog';
+import { WGS84, zorunluCrs, indirmeUzantisi } from './lib/katalog';
 import { itrf96Mi, veridenItrf96Dilimi } from './lib/dilim';
 import './App.css';
 const KAYNAK_RENK = '#ff4c4c';
@@ -17,7 +17,8 @@ const hataMesaji = (err) => err?.message || String(err);
 
 function indirmeAdi(orijinalAd, uzanti) {
   const kok = (orijinalAd || 'donusturulmus_veri').replace(/\.[^./\\]+$/, '') || 'donusturulmus_veri';
-  return kok + uzanti;
+  // Klasör tabanlı formatlar (File Geodatabase, MapInfo TAB) ZIP içinde iner: ad.gdb.zip
+  return kok + indirmeUzantisi(uzanti);
 }
 
 function dosyayiIndir(veri, mime, ad) {

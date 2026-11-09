@@ -323,7 +323,7 @@ export const tirnakla = (ad) => `"${String(ad).replace(/"/g, '""')}"`
 const TARIH = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 const TARIH_ZAMAN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?Z?$/
 
-function degerTipi(v) {
+export function degerTipi(v) {
   if (typeof v === 'boolean') return 'BOOLEAN'
   if (typeof v === 'number') {
     if (Number.isSafeInteger(v)) return 'INTEGER'
@@ -338,11 +338,11 @@ function degerTipi(v) {
 }
 
 /** Değer tam sayı ama 2^53'ü aşıyor mu (double'da birebir saklanamaz)? */
-const guvensizTamSayi = (v) =>
+export const guvensizTamSayi = (v) =>
   (typeof v === 'number' && Number.isInteger(v) && !Number.isSafeInteger(v)) ||
   (typeof v === 'bigint' && (v > BigInt(Number.MAX_SAFE_INTEGER) || v < BigInt(Number.MIN_SAFE_INTEGER)))
 
-function tipBirlestir(a, b) {
+export function tipBirlestir(a, b) {
   if (!a) return b
   if (a === b) return a
   if ((a === 'INTEGER' && b === 'REAL') || (a === 'REAL' && b === 'INTEGER')) return 'REAL'

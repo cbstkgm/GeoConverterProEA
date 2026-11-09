@@ -69,7 +69,15 @@ export const DESTEKLENEN_CIKTILAR = [
   { uzanti: '.usdz', aciklama: 'USDZ paketi', mime: 'model/vnd.usdz+zip' },
   { uzanti: '.ma', aciklama: 'Maya ASCII sahnesi', mime: 'text/plain' },
   { uzanti: '.3dm', aciklama: 'Rhino 3DM (openNURBS)', mime: 'application/octet-stream' },
+  // CBS veritabanı — klasör/çok dosyalı formatlar ZIP içinde iner (indirme adı: ad.gdb.zip, ad.tab.zip)
+  { uzanti: '.gdb', aciklama: 'Esri File Geodatabase (ArcGIS 10.x+, ZIP içinde)', mime: 'application/zip', indirme: '.gdb.zip' },
+  { uzanti: '.tab', aciklama: 'MapInfo TAB (ZIP: .tab/.dat/.map/.id)', mime: 'application/zip', indirme: '.tab.zip' },
+  { uzanti: '.map', aciklama: 'MapInfo MAP (ZIP: .tab/.dat/.map/.id)', mime: 'application/zip', indirme: '.tab.zip' },
 ];
+
+/** İndirilecek dosyanın uzantısı (çoğu formatta çıktı uzantısıyla aynı). */
+export const indirmeUzantisi = (uzanti) =>
+  DESTEKLENEN_CIKTILAR.find((c) => c.uzanti === uzanti)?.indirme ?? uzanti;
 
 /** KML 2.2 standardı koordinatları yalnızca WGS84 boylam/enlem olarak tanımlar. */
 export const WGS84_ZORUNLU_CIKTILAR = new Set(['.kml', '.kmz']);
